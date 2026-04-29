@@ -1,0 +1,21 @@
+{
+  "name": "cursed-crosshair-generator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Self-hosted web app for designing and exporting CS2 'Cursed Crosshair' configs.",
+  "license": "MIT",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.6",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.4.1",
+    "express-session": "^1.18.1"
+  }
+}

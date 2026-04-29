@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Admin Login — j4nkTTV's Cursed Crosshair Generator</title>
+  <link rel="stylesheet" href="/static/css/styles.css" />
+</head>
+<body>
+  <main class="login-shell">
+    <div class="card login-card">
+      <h2>Admin Login</h2>
+      <p class="muted mb-2"><a href="https://www.twitch.tv/j4nkttv" target="_blank" rel="noopener" class="brand-link">j4nkTTV's Cursed Crosshair Generator</a></p>
+      <form id="login-form">
+        <div class="field">
+          <label for="username">User</label>
+          <input type="text" id="username" autocomplete="username" required />
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input type="password" id="password" autocomplete="current-password" required />
+        </div>
+        <div id="login-error" style="color:var(--err); font-size:13px; min-height:18px;" class="mb-1"></div>
+        <button type="submit" class="btn btn-primary" style="width:100%;">Sign in</button>
+      </form>
+      <div class="mt-2 text-right"><a href="/" class="muted">Back to public page</a></div>
+    </div>
+  </main>
+
+  <footer class="public-footer">
+    Made by <a href="https://steamcommunity.com/id/patwin/" target="_blank" rel="noopener">patriQ</a> with <span class="heart">&#9829;</span>
+  </footer>
+
+  <script type="module">
+    import { api } from '/static/js/api.js';
+
+    const form = document.getElementById('login-form');
+    const errEl = document.getElementById('login-error');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errEl.textContent = '';
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+      try {
+        await api.post('/admin/login', { username, password });
+        location.href = '/admin';
+      } catch (err) {
+        if (err && err.status === 429) {
+          errEl.textContent = 'Too many attempts. Please wait 15 minutes.';
+        } else {
+          errEl.textContent = 'Invalid credentials.';
+        }
+      }
+    });
+  </script>
+</body>
+</html>

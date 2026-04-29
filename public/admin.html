@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Admin — j4nkTTV's Cursed Crosshair Generator</title>
+  <link rel="stylesheet" href="/static/css/styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand"><a href="/" class="brand-link">j4nkTTV's Cursed <span class="accent">Crosshair</span> Generator</a></div>
+    <div class="right">
+      <span class="badge">Admin</span>
+      <span id="autosave" class="muted" style="font-size:12px;"></span>
+      <button class="btn" id="logout-btn">Logout</button>
+    </div>
+  </header>
+
+  <main class="admin-shell">
+    <nav class="tabs">
+      <button class="tab active" data-tab="presets">Presets</button>
+      <button class="tab" data-tab="submissions">
+        Submissions <span id="pending-count" class="badge-count" style="display:none;">0</span>
+      </button>
+      <button class="tab" data-tab="approved">
+        Approved Crosshairs <span id="backup-count" class="badge-count" style="display:none;">0</span>
+      </button>
+    </nav>
+
+    <!-- Presets tab -->
+    <section id="tab-presets" class="tab-pane">
+      <div class="flex-row mb-2" style="gap:8px; flex-wrap: wrap;">
+        <button class="btn" id="add-preset-btn">+ Add Preset</button>
+        <button class="btn" id="sharecode-btn">Import / Export Code</button>
+        <button class="btn" id="import-cfg-btn">Import .cfg</button>
+        <button class="btn" id="edit-restore-btn">Edit Restore Crosshair</button>
+        <button class="btn" id="edit-keys-btn">Key Bindings</button>
+        <span class="spacer"></span>
+        <span class="muted" id="preset-counter">0 presets</span>
+        <button class="btn btn-danger" id="delete-all-btn">Delete all</button>
+        <button class="btn btn-primary" id="export-btn">Export .cfg</button>
+      </div>
+      <div class="three-col">
+        <div>
+          <div class="card" style="padding:12px;">
+            <div id="preset-list" class="preset-list"></div>
+          </div>
+        </div>
+        <div>
+          <div class="card">
+            <h2 id="active-preset-name">Live Preview</h2>
+            <div id="admin-preview-controls-host"></div>
+            <div id="admin-preview" class="preview"></div>
+          </div>
+        </div>
+        <div>
+          <div class="card" id="admin-editor-card">
+            <h2>Editor</h2>
+            <div class="field">
+              <label for="active-name">Name</label>
+              <input type="text" id="active-name" maxlength="60" />
+            </div>
+            <div id="admin-editor"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Submissions tab -->
+    <section id="tab-submissions" class="tab-pane" style="display:none;">
+      <div class="flex-row mb-2" style="gap:8px;">
+        <label for="status-filter" class="muted">Filter</label>
+        <select id="status-filter" style="width:auto;">
+          <option value="pending">Pending</option>
+          <option value="approved">Approved</option>
+          <option value="rejected">Rejected</option>
+          <option value="all">All</option>
+        </select>
+        <span class="spacer"></span>
+        <button class="btn btn-danger" id="cleanup-btn">Clear approved/rejected</button>
+      </div>
+      <div id="submissions-host"></div>
+    </section>
+
+    <!-- Approved Crosshairs tab -->
+    <section id="tab-approved" class="tab-pane" style="display:none;">
+      <div class="flex-row mb-2" style="gap:8px;">
+        <span class="muted">Approved submissions — load them into your active presets or remove them.</span>
+        <span class="spacer"></span>
+      </div>
+      <div id="approved-host"></div>
+    </section>
+  </main>
+
+  <!-- Restore editor modal -->
+  <div id="restore-modal" class="modal-backdrop">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Restore Crosshair (Green Default)</h3>
+        <button class="btn btn-ghost btn-icon" data-close="restore-modal">×</button>
+      </div>
+      <div class="flex-row mb-2" style="gap:8px;">
+        <button class="btn" id="restore-sharecode-btn">Import / Export Code</button>
+      </div>
+      <div class="three-col">
+        <div></div>
+        <div>
+          <div id="restore-preview-controls-host"></div>
+          <div id="restore-preview" class="preview"></div>
+        </div>
+        <div>
+          <div id="restore-editor"></div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" data-close="restore-modal">Cancel</button>
+        <button class="btn btn-primary" id="save-restore-btn">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Key bindings modal -->
+  <div id="keys-modal" class="modal-backdrop">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <h3>Key Bindings</h3>
+        <button class="btn btn-ghost btn-icon" data-close="keys-modal">×</button>
+      </div>
+      <div class="field">
+        <label for="key-next">Next-Cursed Key</label>
+        <input type="text" id="key-next" maxlength="32" />
+      </div>
+      <div class="field">
+        <label for="key-restore">Restore Key</label>
+        <input type="text" id="key-restore" maxlength="32" />
+      </div>
+      <div class="modal-actions">
+        <button class="btn" data-close="keys-modal">Cancel</button>
+        <button class="btn btn-primary" id="save-keys-btn">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Submission edit modal -->
+  <div id="submission-modal" class="modal-backdrop">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Review Submission — <span id="sub-modal-by"></span></h3>
+        <button class="btn btn-ghost btn-icon" data-close="submission-modal">×</button>
+      </div>
+      <div class="three-col">
+        <div>
+          <p class="muted" id="sub-modal-info"></p>
+        </div>
+        <div>
+          <div id="sub-preview" class="preview"></div>
+        </div>
+        <div>
+          <div class="field">
+            <label for="sub-name">Crosshair Name</label>
+            <input type="text" id="sub-name" maxlength="60" />
+          </div>
+          <div id="sub-editor"></div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" data-close="submission-modal">Cancel</button>
+        <button class="btn" id="save-sub-btn">Save changes to submission</button>
+        <button class="btn btn-primary" id="approve-sub-btn">Approve & Add to Presets</button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="public-footer">
+    Made by <a href="https://steamcommunity.com/id/patwin/" target="_blank" rel="noopener">patriQ</a> with <span class="heart">&#9829;</span>
+  </footer>
+
+  <script type="module" src="/static/js/admin.js"></script>
+</body>
+</html>

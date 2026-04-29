@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>j4nkTTV's Cursed Crosshair Generator</title>
+  <link rel="stylesheet" href="/static/css/styles.css" />
+</head>
+<body>
+  <main class="public-shell">
+    <header class="public-hero">
+      <h1><a href="https://www.twitch.tv/j4nkttv" target="_blank" rel="noopener" class="brand-link">j4nkTTV's Cursed Crosshair Generator</a></h1>
+      <p>Submit your cursed crosshair</p>
+    </header>
+
+    <section class="public-grid">
+      <div class="card">
+        <h2>Editor</h2>
+        <p class="muted">Tweak the parameters. Live preview updates instantly.</p>
+        <div class="flex-row mb-2" style="gap:8px;">
+          <button id="open-sharecode" class="btn btn-sm">Import / Export Code</button>
+        </div>
+        <div id="editor"></div>
+        <div class="mt-2 text-right">
+          <button id="open-submit" class="btn btn-primary">Submit Crosshair</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Live Preview</h2>
+        <div id="preview-controls-host"></div>
+        <div id="preview" class="preview"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="public-footer">
+    Made by <a href="https://steamcommunity.com/id/patwin/" target="_blank" rel="noopener">patriQ</a> with <span class="heart">&#9829;</span> &middot; <a href="/admin/login">Admin</a>
+  </footer>
+
+  <!-- Submit modal -->
+  <div id="submit-modal" class="modal-backdrop">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <h3>Submit your crosshair</h3>
+        <button class="btn btn-ghost btn-icon" id="cancel-submit" aria-label="Close">×</button>
+      </div>
+      <div class="field">
+        <label for="submitter-name">Your Name</label>
+        <input type="text" id="submitter-name" maxlength="40" autocomplete="off" />
+      </div>
+      <div class="field">
+        <label for="preset-name">Crosshair Name</label>
+        <input type="text" id="preset-name" maxlength="60" autocomplete="off" />
+      </div>
+      <div class="field">
+        <div id="turnstile-host"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" id="cancel-submit2" onclick="document.getElementById('cancel-submit').click()">Cancel</button>
+        <button class="btn btn-primary" id="submit-btn" disabled>Submit</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Thank you overlay -->
+  <div id="thanks-overlay" class="modal-backdrop">
+    <div class="modal modal-sm" style="text-align:center;">
+      <h2>Thanks <span id="thanks-name"></span>!</h2>
+      <p class="muted">Your crosshair was submitted for review.</p>
+      <div class="modal-actions" style="justify-content:center;">
+        <button id="thanks-another" class="btn btn-primary">Submit another</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/static/js/public.js"></script>
+</body>
+</html>
