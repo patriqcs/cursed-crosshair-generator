@@ -1,8 +1,10 @@
 import { buildEditor, clone } from './editor.js';
-import { renderCrosshair, ensureSvg } from './preview.js';
+import { renderCrosshair, ensureSvg, registerForRerender } from './preview.js';
 import { api } from './api.js';
 import { toast } from './toast.js';
 import { confirmDialog } from './confirm.js';
+import { buildBgSelector } from './bg.js';
+import { buildPreviewControls } from './preview-settings.js';
 
 const ss = {
   filter: 'pending',
@@ -116,6 +118,37 @@ function escapeHtml(str) {
 }
 
 let subPreviewSvg;
+let subControlsReady = false;
+
+// Einmaliges Setup: Background- + Zoom-Selector ueber dem Review-Preview.
+// Listeners persistieren ueber Modal-Open/Close — der registrierte Rerender
+// liefert ss.draft (oder null falls Modal zu) zurueck.
+function setupSubModalControls() {
+  if (subControlsReady) return;
+  const previewEl = document.getElementById('sub-preview');
+  if (!previewEl) return;
+  if (!subPreviewSvg) subPreviewSvg = ensureSvg(previewEl);
+
+  const bgSelect = buildBgSelector([previewEl]);
+  bgSelect.id = 'sub-bg-select';
+  const bgWrap = document.createElement('span');
+  bgWrap.style.display = 'inline-flex';
+  bgWrap.style.alignItems = 'center';
+  bgWrap.style.gap = '6px';
+  const bgLabel = document.createElement('label');
+  bgLabel.className = 'muted';
+  bgLabel.style.margin = '0';
+  bgLabel.textContent = 'Background';
+  bgWrap.appendChild(bgLabel);
+  bgWrap.appendChild(bgSelect);
+
+  const controls = buildPreviewControls(bgWrap);
+  const ctlHost = document.getElementById('sub-preview-controls-host');
+  if (ctlHost) ctlHost.appendChild(controls);
+
+  registerForRerender(subPreviewSvg, () => ss.draft || null);
+  subControlsReady = true;
+}
 
 function openSubModal(sub) {
   ss.editing = sub;
@@ -237,6 +270,8 @@ export async function initSubmissionsTab(opts = {}) {
   document.getElementById('cleanup-btn').addEventListener('click', cleanup);
   document.getElementById('save-sub-btn').addEventListener('click', saveSubChanges);
   document.getElementById('approve-sub-btn').addEventListener('click', approveFromModal);
+
+  setupSubModalControls();
 
   await refreshList();
 }
