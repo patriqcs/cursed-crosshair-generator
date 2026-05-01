@@ -170,10 +170,14 @@ label { font-size: 12px; color: var(--text-dim); display: block; margin-bottom: 
   color: var(--text); border-color: var(--accent);
   background: var(--bg-elev); outline: none;
 }
+/* Tooltip wird per JS an <body> portaliert, sobald der Button gehovert/
+   fokussiert wird. position:fixed + viewport-clamp im JS verhindert
+   clipping durch Modals (.modal hat overflow:auto) und enge Grid-Spalten. */
 .info-tooltip {
   display: none;
-  position: absolute; top: calc(100% + 6px); left: 0;
-  z-index: 50; width: 320px;
+  position: fixed; top: 0; left: 0;
+  z-index: 9999; width: 320px;
+  max-width: calc(100vw - 16px);
   background: var(--bg-elev-2);
   border: 1px solid var(--border-strong); border-radius: var(--radius);
   padding: 12px 14px;
@@ -181,14 +185,12 @@ label { font-size: 12px; color: var(--text-dim); display: block; margin-bottom: 
   text-transform: none; letter-spacing: 0; line-height: 1.5;
   box-shadow: var(--shadow);
   cursor: default;
+  pointer-events: none;
 }
+.info-tooltip.open { display: block; }
 .info-tooltip p { margin: 0 0 8px 0; }
 .info-tooltip p:last-child { margin-bottom: 0; }
 .info-tooltip strong { color: var(--accent); font-weight: 600; }
-.info-btn:hover .info-tooltip,
-.info-btn:focus .info-tooltip {
-  display: block;
-}
 
 /* Toggle switch */
 .toggle {

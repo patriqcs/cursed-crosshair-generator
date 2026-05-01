@@ -176,14 +176,74 @@ function buildToggle(field, params, onChange) {
 }
 
 function buildInfoButton(html) {
-  // Der Button enthaelt das Tooltip als Kind-Element, sodass `:hover`/`:focus`
-  // auf dem Button das Tooltip einblenden kann (CSS-only).
+  // Tooltip wird beim Hover/Focus an document.body portaliert und per
+  // position:fixed positioniert — bricht damit aus Modal-Containern
+  // (`.modal { overflow:auto }`) und engen Grid-Spalten (three-col 360px)
+  // aus, statt vom Container abgeschnitten zu werden / Modal-Scrollbars
+  // zu erzeugen. Kein CSS-only-:hover-Toggle mehr; Lifecycle ueber JS.
   const btn = el('span', {
     class: 'info-btn', role: 'button', tabindex: '0',
     'aria-label': 'More info',
   }, '?');
   const tip = el('div', { class: 'info-tooltip', html });
-  btn.appendChild(tip);
+
+  let attached = false;
+
+  function position() {
+    const margin = 8;
+    const rect = btn.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    // Erst messen — dafuer muss das Tooltip im DOM und sichtbar sein.
+    const tipRect = tip.getBoundingClientRect();
+    const tipW = tipRect.width;
+    const tipH = tipRect.height;
+
+    // Horizontal: linke Kante am Button ausrichten, ans Viewport clampen.
+    let x = rect.left;
+    if (x + tipW + margin > vw) x = vw - tipW - margin;
+    if (x < margin) x = margin;
+
+    // Vertikal: bevorzugt unter dem Button; passt nichts unten, dann oben;
+    // wenn beide nicht reichen, ans Viewport clampen.
+    let y = rect.bottom + 6;
+    if (y + tipH + margin > vh) {
+      const above = rect.top - tipH - 6;
+      if (above >= margin) y = above;
+      else y = Math.max(margin, vh - tipH - margin);
+    }
+
+    tip.style.left = `${x}px`;
+    tip.style.top = `${y}px`;
+  }
+
+  function show() {
+    if (!attached) {
+      document.body.appendChild(tip);
+      attached = true;
+    }
+    tip.classList.add('open');
+    position();
+  }
+
+  function hide() {
+    tip.classList.remove('open');
+    if (attached) {
+      tip.remove();
+      attached = false;
+    }
+  }
+
+  btn.addEventListener('mouseenter', show);
+  btn.addEventListener('mouseleave', hide);
+  btn.addEventListener('focus', show);
+  btn.addEventListener('blur', hide);
+  // Bei Scroll im Modal/Viewport oder Resize Tooltip neu positionieren,
+  // damit er am Button kleben bleibt. capture=true faengt auch Scroll
+  // innerhalb des Modals (overflow:auto auf .modal selbst).
+  window.addEventListener('scroll', () => { if (attached) position(); }, true);
+  window.addEventListener('resize', () => { if (attached) position(); });
+
   return btn;
 }
 
