@@ -2,7 +2,7 @@
 //
 // Aktuell: Zoom-Level. Beeinflusst nur den darzustellenden Ausschnitt der
 // Preview (viewBox-Crop), nicht die Render-Mathematik. Die Crosshair-Geometrie
-// bleibt pixelgenau zur CS2-1440x1080-Renderaufloesung — der Zoom zoomt nur
+// bleibt pixelgenau zur CS2-1280x960-Renderaufloesung — der Zoom zoomt nur
 // die *Kamera* auf das Zentrum.
 
 const ZOOM_OPTIONS = [1, 2, 3, 4, 6, 8];
@@ -64,7 +64,7 @@ export function buildPreviewControls(extraSlot = null) {
     const opt = document.createElement('option');
     opt.value = String(z);
     // Zoom 1x heisst im UI "Original" — entspricht dem nativen
-    // 1440x1080-Frame ohne Crop.
+    // 1280x960-Frame ohne Crop.
     opt.textContent = z === 1 ? 'Original' : `${z}×`;
     if (z === currentZoom) opt.selected = true;
     select.appendChild(opt);

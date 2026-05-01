@@ -1,10 +1,13 @@
 // CS2-style crosshair SVG renderer.
 //
-// Implementiert die CS2-Source-Engine-Renderlogik 1:1. Validiert gegen
-// 8 Calibration-Screenshots in 1440x1080 native (siehe data/calibration/).
+// Implementiert die CS2-Source-Engine-Renderlogik 1:1. Render-Resolution ist
+// 1280x960 (Streamer-Spielaufloesung), 4:3 native. Die Calibration unter
+// data/calibration/ wurde gegen 1440x1080-Screenshots erstellt — die CS2-
+// Formel selbst ist aber auflosungsunabhaengig korrekt (sie skaliert linear
+// mit SCREEN_H), die Calibration belegt also weiterhin die Korrektheit.
 //
 // Kernformel (Style 4, statisches Crosshair):
-//   YRES(x)        = x * SCREEN_H / 480
+//   YRES(x)        = x * SCREEN_H / 480           // bei 960: x * 2.0
 //   iBarSize       = round-half-to-even(YRES(size))
 //   iBarThickness  = max(1, round-half-to-even(YRES(thickness)))
 //   iCrosshairDist = 4 + gap                       // Pixel, NICHT skaliert
@@ -14,16 +17,16 @@
 // Rect um cl_crosshair_outlinethickness Pixel (auch nicht skaliert) in
 // alle 4 Richtungen, gezeichnet HINTER der Farbfuellung.
 //
-// SVG-viewBox = 0 0 1440 1080 — 1 SVG-Einheit = 1 CS2-Pixel bei 1080p,
-// damit Overlays auf 1440x1080-Screenshots pixelgenau passen.
+// SVG-viewBox = 0 0 1280 960 — 1 SVG-Einheit = 1 CS2-Pixel bei 960p,
+// damit Overlays auf 1280x960-Screenshots pixelgenau passen.
 
 import { onChange, getSettings } from './preview-settings.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
-const SCREEN_W = 1440;
-const SCREEN_H = 1080;
-const CENTER_X = SCREEN_W / 2;   // 720
-const CENTER_Y = SCREEN_H / 2;   // 540
+const SCREEN_W = 1280;
+const SCREEN_H = 960;
+const CENTER_X = SCREEN_W / 2;   // 640
+const CENTER_Y = SCREEN_H / 2;   // 480
 const REF_H = 480;               // Source-Engine Referenzhoehe
 
 function YRES(x) {
@@ -143,7 +146,7 @@ function computeRects(params) {
 // renderCrosshair(svg, params, opts?)
 //   opts.zoom — viewBox-Zoom auf das Zentrum (cropped frame, gleiche
 //     Render-Mathematik). Default = global aus preview-settings. Mit
-//     opts.zoom: 1 erzwingt der Aufrufer den vollen 1440x1080-Frame
+//     opts.zoom: 1 erzwingt der Aufrufer den vollen 1280x960-Frame
 //     unabhaengig vom globalen Zoom.
 export function renderCrosshair(svg, params, opts = {}) {
   clearChildren(svg);

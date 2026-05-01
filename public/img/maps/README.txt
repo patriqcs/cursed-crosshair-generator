@@ -5,7 +5,7 @@ Drop image files here named after the map slug. Files are loaded from
 /static/img/maps/<slug>.<ext> — the loader probes these extensions in
 order and uses the first one it finds: jpg, jpeg, png, webp.
 
-Recommended: 1440x1080 or higher in 4:3 aspect (the preview is 4:3).
+Recommended: 1280x960 or higher in 4:3 aspect (the preview renders at 1280x960 native).
 JPG is preferred (smaller files); PNG/WebP also work.
 
 Recognised slugs (any of the above extensions):
