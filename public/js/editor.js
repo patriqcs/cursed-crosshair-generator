@@ -188,13 +188,17 @@ function buildInfoButton(html) {
   const tip = el('div', { class: 'info-tooltip', html });
 
   let attached = false;
+  let hideTimer = null;
 
   function position() {
     const margin = 8;
     const rect = btn.getBoundingClientRect();
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    // Erst messen — dafuer muss das Tooltip im DOM und sichtbar sein.
+    // Tooltip muss bereits im DOM + sichtbar sein, sonst liefert
+    // getBoundingClientRect() 0/0 und das Clamping geht schief.
+    // requestAnimationFrame waere theoretisch sauberer, aber sync
+    // measure reicht — der Browser triggert reflow on demand.
     const tipRect = tip.getBoundingClientRect();
     const tipW = tipRect.width;
     const tipH = tipRect.height;
@@ -205,7 +209,8 @@ function buildInfoButton(html) {
     if (x < margin) x = margin;
 
     // Vertikal: bevorzugt unter dem Button; passt nichts unten, dann oben;
-    // wenn beide nicht reichen, ans Viewport clampen.
+    // wenn beide nicht reichen, ans Viewport clampen. Tooltip selbst hat
+    // max-height + overflow-y, kann also nie hoeher als vh werden.
     let y = rect.bottom + 6;
     if (y + tipH + margin > vh) {
       const above = rect.top - tipH - 6;
@@ -218,6 +223,7 @@ function buildInfoButton(html) {
   }
 
   function show() {
+    if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
     if (!attached) {
       document.body.appendChild(tip);
       attached = true;
@@ -226,18 +232,29 @@ function buildInfoButton(html) {
     position();
   }
 
-  function hide() {
-    tip.classList.remove('open');
-    if (attached) {
-      tip.remove();
-      attached = false;
-    }
+  // Verzoegertes Hide, damit Maus von Button -> 6px-Gap -> Tooltip wandern
+  // kann ohne dass der Tooltip zwischendurch schliesst (sonst kann der
+  // User langen Text nicht in Ruhe lesen / im Tooltip scrollen).
+  function scheduleHide() {
+    if (hideTimer) clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => {
+      tip.classList.remove('open');
+      if (attached) {
+        tip.remove();
+        attached = false;
+      }
+      hideTimer = null;
+    }, 150);
   }
 
   btn.addEventListener('mouseenter', show);
-  btn.addEventListener('mouseleave', hide);
+  btn.addEventListener('mouseleave', scheduleHide);
   btn.addEventListener('focus', show);
-  btn.addEventListener('blur', hide);
+  btn.addEventListener('blur', scheduleHide);
+  // Tooltip selbst soll Hover halten + Hide-Timer canceln, damit der user
+  // reinscrollen / lesen kann.
+  tip.addEventListener('mouseenter', show);
+  tip.addEventListener('mouseleave', scheduleHide);
   // Bei Scroll im Modal/Viewport oder Resize Tooltip neu positionieren,
   // damit er am Button kleben bleibt. capture=true faengt auch Scroll
   // innerhalb des Modals (overflow:auto auf .modal selbst).

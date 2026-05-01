@@ -172,12 +172,17 @@ label { font-size: 12px; color: var(--text-dim); display: block; margin-bottom: 
 }
 /* Tooltip wird per JS an <body> portaliert, sobald der Button gehovert/
    fokussiert wird. position:fixed + viewport-clamp im JS verhindert
-   clipping durch Modals (.modal hat overflow:auto) und enge Grid-Spalten. */
+   clipping durch Modals (.modal hat overflow:auto) und enge Grid-Spalten.
+   max-height + overflow-y kappt das Tooltip aufs Viewport, damit auch
+   sehr lange Inhalte nie aus dem Bildschirm laufen — pointer-events:auto
+   erlaubt dann Wheel-Scrolling innerhalb des Tooltips. */
 .info-tooltip {
   display: none;
   position: fixed; top: 0; left: 0;
   z-index: 9999; width: 320px;
   max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   background: var(--bg-elev-2);
   border: 1px solid var(--border-strong); border-radius: var(--radius);
   padding: 12px 14px;
@@ -185,7 +190,6 @@ label { font-size: 12px; color: var(--text-dim); display: block; margin-bottom: 
   text-transform: none; letter-spacing: 0; line-height: 1.5;
   box-shadow: var(--shadow);
   cursor: default;
-  pointer-events: none;
 }
 .info-tooltip.open { display: block; }
 .info-tooltip p { margin: 0 0 8px 0; }
