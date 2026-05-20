@@ -92,7 +92,7 @@ app.get('/', (_req, res) => {
 });
 
 app.get('/favicon.ico', (_req, res) => {
-  res.sendFile(path.join(PUBLIC_DIR, 'img', 'icon.png'));
+  res.sendFile(path.join(PUBLIC_DIR, 'img', 'favicon.png'));
 });
 
 app.get('/api/public/config', (_req, res) => {
