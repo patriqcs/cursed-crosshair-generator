@@ -91,6 +91,10 @@ app.get('/', (_req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
 });
 
+app.get('/favicon.ico', (_req, res) => {
+  res.sendFile(path.join(PUBLIC_DIR, 'img', 'icon.png'));
+});
+
 app.get('/api/public/config', (_req, res) => {
   res.json({
     turnstileSiteKey: turnstile.getSiteKey() || null,
