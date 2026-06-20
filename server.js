@@ -18,8 +18,22 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 const app = express();
-app.set('trust proxy', true);
+// Hinter genau EINEM Proxy (Cloudflare Tunnel / cloudflared) -> 1 statt 'true',
+// damit nicht beliebige X-Forwarded-For-Hops vertraut werden. Per TRUST_PROXY
+// überschreibbar. WICHTIG: Der Container-Port darf NUR über den Tunnel erreichbar
+// sein — sonst kann CF-Connecting-IP gespooft und das Rate-Limit umgangen werden.
+const TRUST_PROXY = process.env.TRUST_PROXY;
+app.set(
+  'trust proxy',
+  TRUST_PROXY != null && TRUST_PROXY !== ''
+    ? (/^\d+$/.test(TRUST_PROXY) ? parseInt(TRUST_PROXY, 10) : TRUST_PROXY)
+    : 1,
+);
 app.disable('x-powered-by');
+
+// Harte Obergrenze für offene Submissions (DoS-Backstop gegen unbegrenztes
+// Dateiwachstum, unabhängig vom Per-IP-Limit).
+const MAX_PENDING_SUBMISSIONS = parseInt(process.env.MAX_PENDING_SUBMISSIONS || '500', 10);
 
 // Real-IP key for rate limiters (Cloudflare Tunnel sets CF-Connecting-IP)
 function realIpKey(req) {
@@ -124,6 +138,10 @@ app.post('/api/submissions', submitLimiter, async (req, res) => {
   }
 
   const data = state.readSubmissions();
+  const pending = data.submissions.reduce((acc, s) => acc + (s.status === 'pending' ? 1 : 0), 0);
+  if (pending >= MAX_PENDING_SUBMISSIONS) {
+    return res.status(429).json({ error: 'submission_queue_full' });
+  }
   const id = state.newId();
   const submission = {
     id,
@@ -201,8 +219,10 @@ app.put('/api/admin/state', (req, res) => {
       const id = typeof p.id === 'string' && p.id.length ? p.id : state.newId();
       const preset = { id, name: valPreset.name, params: valPreset.params };
       if (typeof p.submittedBy === 'string' && p.submittedBy.trim() !== '') {
-        const sn = validation.sanitizePresetName(p.submittedBy.trim()) || p.submittedBy.trim().slice(0, 60);
-        preset.submittedBy = sn;
+        // Nur den sanierten Wert übernehmen; bei unzulässigen Zeichen (")/(;)/(<>)
+        // verwerfen statt den Rohwert durchzulassen.
+        const sn = validation.sanitizePresetName(p.submittedBy.trim());
+        if (sn) preset.submittedBy = sn;
       }
       validatedPresets.push(preset);
     }
