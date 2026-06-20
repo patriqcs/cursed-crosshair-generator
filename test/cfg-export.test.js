@@ -78,3 +78,26 @@ test('buildCfg sanitizes hostile submittedBy so aliases remain well-formed', () 
   const submittedPart = echoSegment.split('(by ')[1] || '';
   assert.equal(submittedPart.includes(';'), false, `submittedBy leaked semicolon: ${submittedPart}`);
 });
+
+test('buildCfg sanitizes hostile preset NAME in the echo line', () => {
+  const state = makeState();
+  state.presets[0].name = 'evil"; bind f9 quit;';
+  const cfg = buildCfg(state);
+  const echoLine = cfg.split('\n').find((l) => /^alias _c1c\s+"/.test(l));
+  assert.ok(echoLine, 'expected _c1c alias line');
+  const quotes = (echoLine.match(/"/g) || []).length;
+  assert.equal(quotes, 2, `unbalanced alias line from hostile name: ${echoLine}`);
+});
+
+test('buildCfg sanitizes hostile bind keys to safe fallbacks', () => {
+  const state = makeState();
+  state.keys = { next: 'f7; quit', restore: 'f8" bind x kill' };
+  const cfg = buildCfg(state);
+  const setupLine = cfg.split('\n').find((l) => /^alias _setup_keys\s+"/.test(l));
+  assert.ok(setupLine, 'expected _setup_keys alias line');
+  const body = setupLine.match(/^alias _setup_keys\s+"(.*)"$/)[1];
+  assert.equal(body.includes('quit'), false, `hostile next key leaked: ${body}`);
+  assert.equal(body.includes('kill'), false, `hostile restore key leaked: ${body}`);
+  assert.ok(body.includes('bind f7 cursed_next'));
+  assert.ok(body.includes('bind f8 cursed_restore'));
+});
