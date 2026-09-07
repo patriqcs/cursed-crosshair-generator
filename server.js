@@ -3,7 +3,7 @@
 const path = require('path');
 const express = require('express');
 const cookieParser = require('cookie-parser');
-const rateLimit = require('express-rate-limit');
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 
 const fs = require('fs');
 const storage = require('./lib/storage');
@@ -36,10 +36,12 @@ app.disable('x-powered-by');
 const MAX_PENDING_SUBMISSIONS = parseInt(process.env.MAX_PENDING_SUBMISSIONS || '500', 10);
 
 // Real-IP key for rate limiters (Cloudflare Tunnel sets CF-Connecting-IP)
+// IPv6 wird auf das /64-Praefix normalisiert: ein Consumer-Anschluss hat ein
+// ganzes /64 und koennte sonst pro Adresse ein frisches Limit bekommen.
 function realIpKey(req) {
   const cf = req.get('CF-Connecting-IP');
-  if (cf && cf.trim() !== '') return cf.trim();
-  return req.ip || 'unknown';
+  const ip = cf && cf.trim() !== '' ? cf.trim() : (req.ip || 'unknown');
+  return ip.includes(':') ? ipKeyGenerator(ip, 64) : ip;
 }
 
 // Initialise data dir + seed early so first-run errors surface at boot
@@ -85,6 +87,18 @@ const loginLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: realIpKey,
+  message: { error: 'too_many_requests' },
+});
+
+// Zweite Bremse fuer den Login unabhaengig von der Client-IP: begrenzt
+// Password-Spraying ueber viele Adressen (z. B. ein rotierendes IPv6-/64 oder
+// ein Botnetz) auf 30 Versuche je 15 Minuten insgesamt.
+const loginGlobalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: false,
+  legacyHeaders: false,
+  keyGenerator: () => 'global',
   message: { error: 'too_many_requests' },
 });
 
@@ -166,7 +180,7 @@ app.get('/admin/login', (req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, 'login.html'));
 });
 
-app.post('/admin/login', loginLimiter, (req, res) => {
+app.post('/admin/login', loginLimiter, loginGlobalLimiter, (req, res) => {
   const { username, password } = req.body || {};
   const userOk = auth.timingSafeEqualStr(String(username || ''), ADMIN_USER);
   const passOk = auth.timingSafeEqualStr(String(password || ''), ADMIN_PASSWORD);
@@ -194,6 +208,11 @@ app.get('/admin', auth.requireAuth, (_req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, 'admin.html'));
 });
 
+// Admin-Antworten nie cachen (Back/bfcache nach Logout, gemeinsame Browser).
+app.use(['/api/admin', '/admin'], (_req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
 app.use('/api/admin', auth.requireAuth);
 app.use('/admin', auth.requireAuth);
 
@@ -408,12 +427,19 @@ app.use((req, res, _next) => {
 
 // eslint-disable-next-line no-unused-vars
 app.use((err, _req, res, _next) => {
+  // Client-Fehler des Body-Parsers (ungueltiges JSON, zu grosser Body) sind 4xx
+  // und werden ohne Request-Body geloggt - vorher landete jeder Muell-Body
+  // als 500 samt Inhalt im Log (Log-Flooding/-Injection ohne Login).
+  const status = Number.isInteger(err && err.status) ? err.status : 500;
+  if (status >= 400 && status < 500) {
+    return res.status(status).json({ error: 'bad_request' });
+  }
   // eslint-disable-next-line no-console
-  console.error('[ERR]', err);
+  console.error('[ERR]', err && err.stack ? err.stack : String(err));
   res.status(500).json({ error: 'internal_error' });
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   // eslint-disable-next-line no-console
   console.log(`[INFO] j4nkTTV's Cursed Crosshair Generator listening on :${PORT}`);
   // eslint-disable-next-line no-console
@@ -421,3 +447,14 @@ app.listen(PORT, () => {
   // eslint-disable-next-line no-console
   console.log(`[INFO] Admin login:  http://localhost:${PORT}/admin/login`);
 });
+
+// Graceful Shutdown: node ist PID 1 im Container und hat keinen Default-
+// SIGTERM-Handler; ohne diesen Block wartet docker stop 10 s und killt.
+function shutdown(signal) {
+  // eslint-disable-next-line no-console
+  console.log(`[INFO] ${signal} empfangen, beende ...`);
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 5000).unref();
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
