@@ -1,9 +1,21 @@
 // Parser for the cursed_crosshair.cfg format produced by lib/cfg-export.js.
 // Reverses the 3-part alias chain (_cN / _cNb / _cNc) back into preset
-// objects, plus the 4-part restore chain (cursed_restore / _rb / _rc / _rd)
+// objects, plus the 3-part restore chain (cursed_restore / _rb / _rc)
 // and the key bindings.
+//
+// Tolerant gegenueber alten Cfgs (vor dem CS2-Update 2026-09-22): dort gab es
+// noch eine vierte Restore-Alias (_rd) und die alten Cvars (cl_crosshairsize,
+// cl_crosshairgap, ...). Solche Params werden via isLegacyParams() erkannt,
+// mit migrateLegacyParams() auf das neue Pixel-System umgerechnet und das
+// Ergebnis mit `migrated: true` markiert, damit der Admin die Werte prueft.
 
 import { parseCommands } from './commands.js';
+import { normalizeParams, isLegacyParams } from './cvars.js';
+import { migrateLegacyParams } from './migrate.js';
+
+// Bezugshoehe fuer die Umrechnung alter Cfgs. Der alte Exporter kannte keine
+// Aufloesung; 1080p ist die verbreitetste Annahme.
+const LEGACY_SCREEN_HEIGHT = 1080;
 
 // Strip outer quotes around an alias body
 function stripQuotes(s) {
@@ -25,6 +37,19 @@ function findAliases(text) {
   return out;
 }
 
+// Geparste Rohwerte -> { params, migrated }. Alte Cvars werden migriert,
+// fehlende Werte fuellt normalizeParams mit Defaults.
+function toParams(raw) {
+  const src = raw || {};
+  if (isLegacyParams(src)) {
+    return { params: migrateLegacyParams(src, { screenHeight: LEGACY_SCREEN_HEIGHT }), migrated: true };
+  }
+  // normalizeParams liefert null bei ungueltigen Werten (z.B. unbekannter
+  // Style) — dann Defaults, statt den ganzen Import abzubrechen.
+  const params = normalizeParams(src) || normalizeParams({});
+  return { params, migrated: false };
+}
+
 // Parse a `_cN` group of three aliases. Returns null if the chain is broken.
 function parsePresetGroup(idx, aliases) {
   const a = aliases.get(`_c${idx}`);
@@ -34,7 +59,7 @@ function parsePresetGroup(idx, aliases) {
   // Combine all three; parseCommands ignores alias-chain refs that aren't
   // <cmd> <value> pairs.
   const combined = `${a}; ${b}; ${c}`;
-  const params = parseCommands(combined) || {};
+  const { params, migrated } = toParams(parseCommands(combined));
 
   // Extract preset name + optional submitter from `_cNc` echo line:
   // echo [CURSED #N] <name>  OR  echo [CURSED #N] <name> (by <submitter>)
@@ -42,7 +67,7 @@ function parsePresetGroup(idx, aliases) {
   let submittedBy = null;
   const echoMatch = c.match(/echo\s+\[CURSED\s+#\d+\]\s*(.+?)\s*$/i);
   if (echoMatch) {
-    let raw = echoMatch[1].trim();
+    const raw = echoMatch[1].trim();
     const byMatch = raw.match(/^(.+?)\s+\(by\s+([^)]+)\)\s*$/i);
     if (byMatch) {
       name = byMatch[1].trim();
@@ -52,63 +77,24 @@ function parsePresetGroup(idx, aliases) {
     }
   }
 
-  // Normalise: ensure expected default fields exist
-  const out = {
-    name,
-    params: {
-      cl_crosshairstyle:      params.cl_crosshairstyle ?? 4,
-      cl_crosshairsize:       params.cl_crosshairsize ?? 5,
-      cl_crosshairthickness:  params.cl_crosshairthickness ?? 0.5,
-      cl_crosshairgap:        params.cl_crosshairgap ?? 0,
-      cl_crosshairdot:        params.cl_crosshairdot ?? 0,
-      cl_crosshair_t:         params.cl_crosshair_t ?? 0,
-      cl_crosshair_recoil:    params.cl_crosshair_recoil ?? 0,
-      cl_crosshair_drawoutline: params.cl_crosshair_drawoutline ?? 0,
-      cl_crosshair_outlinethickness: params.cl_crosshair_outlinethickness ?? 0,
-      cl_crosshairusealpha:   params.cl_crosshairusealpha ?? 0,
-      cl_crosshairalpha:      params.cl_crosshairalpha ?? 255,
-      cl_crosshaircolor_r:    params.cl_crosshaircolor_r ?? 0,
-      cl_crosshaircolor_g:    params.cl_crosshaircolor_g ?? 255,
-      cl_crosshaircolor_b:    params.cl_crosshaircolor_b ?? 0,
-      cl_crosshair_dynamic_splitdist: params.cl_crosshair_dynamic_splitdist ?? null,
-    },
-  };
+  const out = { name, params };
   if (submittedBy) out.submittedBy = submittedBy;
+  if (migrated) out.migrated = true;
   return out;
 }
 
+// Restore-Kette: cursed_restore / _rb / _rc (+ optional _rd aus alten Cfgs).
 function parseRestoreGroup(aliases) {
   const a = aliases.get('cursed_restore');
   const b = aliases.get('_rb');
   const c = aliases.get('_rc');
+  if (!a || !b || !c) return null;
   const d = aliases.get('_rd');
-  if (!a || !b || !c || !d) return null;
-  const combined = `${a}; ${b}; ${c}; ${d}`;
-  const params = parseCommands(combined) || {};
-  return {
-    params: {
-      cl_crosshairstyle:      params.cl_crosshairstyle ?? 4,
-      cl_crosshairsize:       params.cl_crosshairsize ?? 0.8,
-      cl_crosshairthickness:  params.cl_crosshairthickness ?? 0.9,
-      cl_crosshairgap:        params.cl_crosshairgap ?? -4,
-      cl_crosshairdot:        params.cl_crosshairdot ?? 0,
-      cl_crosshair_t:         params.cl_crosshair_t ?? 0,
-      cl_crosshair_recoil:    params.cl_crosshair_recoil ?? 0,
-      cl_crosshairgap_useweaponvalue: params.cl_crosshairgap_useweaponvalue ?? 0,
-      cl_fixedcrosshairgap:   params.cl_fixedcrosshairgap ?? 3,
-      cl_crosshair_drawoutline: params.cl_crosshair_drawoutline ?? 1,
-      cl_crosshair_outlinethickness: params.cl_crosshair_outlinethickness ?? 0,
-      cl_crosshairusealpha:   params.cl_crosshairusealpha ?? 0,
-      cl_crosshairalpha:      params.cl_crosshairalpha ?? 255,
-      cl_crosshaircolor_r:    params.cl_crosshaircolor_r ?? 0,
-      cl_crosshaircolor_g:    params.cl_crosshaircolor_g ?? 255,
-      cl_crosshaircolor_b:    params.cl_crosshaircolor_b ?? 91,
-      cl_crosshair_dynamic_maxdist_splitratio: params.cl_crosshair_dynamic_maxdist_splitratio ?? 1,
-      cl_crosshair_dynamic_splitalpha_innermod: params.cl_crosshair_dynamic_splitalpha_innermod ?? 0,
-      cl_crosshair_dynamic_splitalpha_outermod: params.cl_crosshair_dynamic_splitalpha_outermod ?? 1,
-      cl_crosshair_dynamic_splitdist: params.cl_crosshair_dynamic_splitdist ?? 3,
-    },
-  };
+  const combined = [a, b, c, d].filter(Boolean).join('; ');
+  const { params, migrated } = toParams(parseCommands(combined));
+  const out = { params };
+  if (migrated) out.migrated = true;
+  return out;
 }
 
 // Parse `_setup_keys "unbind <next>; bind <next> cursed_next; unbind <restore>; bind <restore> cursed_restore"`

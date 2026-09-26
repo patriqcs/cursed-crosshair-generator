@@ -12,6 +12,7 @@ Deployed via Docker on Unraid (or any Docker host) and exposed publicly through 
 - **Admin dashboard** — tabbed interface (Presets / Submissions), full editor, restore-crosshair editor, key-binding editor, one-click `.cfg` export.
 - **Approval workflow** — review, edit, and approve user submissions. Approved presets get a `(by <name>)` echo line in the exported cfg.
 - **Atomic JSON storage** — `presets.json` and `submissions.json` in a mounted Docker volume (`/data`).
+- **CS2 crosshair system since 2026-09-22** — pixel-based cvars (`cl_crosshair_length/thickness/gap`, `cl_crosshair_screen_height`, ...). Data written with the old cvar set is migrated automatically on first read (backup kept next to the file, see below).
 - **Single-admin auth** — env-var based (`ADMIN_USER`, `ADMIN_PASSWORD`). Auto-generates a random password on first run if none is set.
 - **Real-IP rate limiting** — `CF-Connecting-IP` header is honored. 5 logins / 15 min, 10 submissions / hour per IP.
 - **Cloudflare Tunnel ready** — `trust proxy` enabled, secure cookies, plain HTTP on port 3000.
@@ -146,27 +147,39 @@ If you skip this step, the app will log `[WARN] Turnstile keys not configured �
 
 ## How the exported `.cfg` works
 
+Since the CS2 crosshair update of 2026-09-22 the game uses pixel-based cvars (18 in total, see `public/js/cvars.js`). All 18 are always written. `cl_crosshair_screen_height` is a hidden cvar that the game overwrites whenever length/thickness/gap change, so it is always the **last** cvar in each chain.
+
 The exporter splits each preset into **three chained aliases** (`_cN`, `_cNb`, `_cNc`) because the source-engine console has a per-alias string-length limit. Each preset:
 
-- `_cN` — sets style, size, thickness, gap, dot, T, recoil; chains to `_cNb`.
-- `_cNb` — sets outline, alpha, optionally `cl_crosshair_dynamic_splitdist`; chains to `_cNc`.
-- `_cNc` — sets RGB and emits an `echo [CURSED #N] <name> (by <submitter>)` banner.
+- `_cN` — `cl_crosshairstyle`, `cl_crosshair_length`, `cl_crosshair_thickness`, `cl_crosshair_gap`, `cl_crosshairdot`, `cl_crosshair_t`, `cl_crosshair_recoil`; chains to `_cNb`.
+- `_cNb` — `cl_crosshair_drawoutline`, `cl_crosshaircolor_r/g/b/a`, `cl_crosshair_dynamic_spread_limit`; chains to `_cNc`.
+- `_cNc` — `cl_crosshair_dynamic_splitdist`, `..._splitalpha_innermod`, `..._splitalpha_outermod`, `..._maxdist_splitratio`, `cl_crosshair_screen_height`, then `echo [CURSED #N] <name> (by <submitter>)`.
+
+Numbers are written as integers where possible; floats use at most two decimals.
 
 Rotation:
 
 - `_link1`...`_linkN` chain via `alias cursed_next _linkX`. After preset N, it loops back to `_link1`.
-- The next-key (default `o`) is bound to `cursed_next`.
+- The next-key (default `f7`) is bound to `cursed_next`.
 
 Restore:
 
-- `cursed_restore` runs your green default in four chained aliases (`cursed_restore` → `_rb` → `_rc` → `_rd`).
-- The restore-key (default `p`) is bound to `cursed_restore`.
+- `cursed_restore` runs your green default in three chained aliases with the same layout (`cursed_restore` → `_rb` → `_rc`), ending with `echo [NORMAL] Gruenes Crosshair zurueck`.
+- The restore-key (default `f8`) is bound to `cursed_restore`.
 
 Re-`exec`'ing the cfg in CS2 is safe: every key bind is preceded by `unbind`, so old binds don't conflict.
 
 ---
 
+## Migration of pre-2026-09-22 data
+
+On the first read after the update, any preset, restore or submission still stored with the old cvar set (`cl_crosshairsize`, `cl_crosshairgap`, `cl_crosshairusealpha`, ...) is converted with `migrateLegacyParams()` (`public/js/migrate.js`) at a reference height of 960 px (the resolution the old presets were designed on). Before writing, the original file is copied to `presets.json.pre-cs2-update-<YYYYMMDD>.bak` (resp. `submissions.json.pre-cs2-update-<YYYYMMDD>.bak`) in the data directory; an existing backup is never overwritten. Migrated entries carry `"migrated": true` until they are saved again from the admin UI. The migration is idempotent.
+
+---
+
 ## Local development without Docker
+
+Requires Node >= 22.12 (the server loads the shared browser modules `public/js/cvars.js` / `migrate.js` via `require(esm)`).
 
 ```bash
 npm ci

@@ -196,6 +196,46 @@ label { font-size: 12px; color: var(--text-dim); display: block; margin-bottom: 
 .info-tooltip p:last-child { margin-bottom: 0; }
 .info-tooltip strong { color: var(--accent); font-weight: 600; }
 
+/* Style-Dropdown im Editor (9 Optionen, zu lang fuer Segmented). */
+.field-select {
+  width: 100%;
+  cursor: pointer;
+  appearance: none; -webkit-appearance: none;
+  padding-right: 28px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-dim) 50%),
+                    linear-gradient(135deg, var(--text-dim) 50%, transparent 50%);
+  background-position: calc(100% - 16px) 50%, calc(100% - 11px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+.field-select option { background: var(--bg-elev); color: var(--text); }
+
+/* Farbzeile: Picker + R/G/B. Der Alpha-Slider folgt als eigenes Feld. */
+.rgb-row {
+  display: grid; grid-template-columns: auto 1fr 1fr 1fr; gap: 6px; align-items: center;
+}
+
+/* Hinweistext unter einem Feld (z.B. Bezugshoehe). */
+.field-note {
+  font-size: 11px; color: var(--text-muted); margin-top: 4px; line-height: 1.4;
+}
+
+/* Feld ohne Wirkung fuer den gewaehlten Style: ausgegraut, nicht bedienbar,
+   Wert bleibt erhalten. Bei <details> bleibt die Summary klickbar. */
+.field--inactive { opacity: 0.4; }
+.field--inactive:not(details) { pointer-events: none; }
+details.field--inactive > :not(summary) { pointer-events: none; }
+details.field--inactive > summary { cursor: pointer; }
+
+/* Badge fuer aus dem alten Crosshair-System umgerechnete Presets/Submissions. */
+.badge-migrated {
+  display: inline-block; vertical-align: middle;
+  background: rgba(255, 180, 84, 0.15); color: var(--warn);
+  padding: 0 7px; border-radius: 999px;
+  font-size: 10px; font-weight: 600; line-height: 16px;
+  margin-left: 6px; white-space: nowrap;
+}
+
 /* Toggle switch */
 .toggle {
   position: relative; display: inline-block; width: 44px; height: 22px;
@@ -334,6 +374,7 @@ label { font-size: 12px; color: var(--text-dim); display: block; margin-bottom: 
 }
 .toast.err { border-left-color: var(--err); }
 .toast.ok { border-left-color: var(--green); }
+.toast.warn { border-left-color: var(--warn); }
 @keyframes toast-in { from { transform: translateY(8px); opacity: 0; } }
 
 /* Public page layout */

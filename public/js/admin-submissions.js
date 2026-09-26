@@ -5,6 +5,7 @@ import { toast } from './toast.js';
 import { confirmDialog } from './confirm.js';
 import { buildBgSelector } from './bg.js';
 import { buildPreviewControls } from './preview-settings.js';
+import { migratedBadge } from './admin-presets.js';
 
 const ss = {
   filter: 'pending',
@@ -88,6 +89,7 @@ function renderSubRow(sub) {
     <div class="sub">by ${escapeHtml(sub.submitterName)}</div>
     <div class="date">${relativeTime(sub.submittedAt)}</div>
   `;
+  if (sub.migrated) meta.querySelector('.name').appendChild(migratedBadge());
   row.appendChild(meta);
 
   const actions = document.createElement('div');

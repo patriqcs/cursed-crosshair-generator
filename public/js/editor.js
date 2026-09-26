@@ -1,82 +1,90 @@
 // Builds the parameter editor UI bound to a state object and an onChange callback.
 // Used by both the public submission page and the admin presets editor.
-
-// Cursed-mode limits. Slider min/max match these and number inputs are
-// clamped on input + on blur so out-of-range values are cut off.
 //
-// outlinethickness ist Integer 0..3 (CS2 cvar-Range). 0 = "Outline gezeichnet
-// aber unsichtbar duenn"-Sentinel, der drawoutline-Toggle bestimmt zusaetzlich
-// ob die Outline ueberhaupt aktiv ist.
-export const FIELD_LIMITS = Object.freeze({
-  cl_crosshairsize: { min: 0, max: 500 },
-  cl_crosshairthickness: { min: 0, max: 500 },
-  cl_crosshairgap: { min: -500, max: 500 },
-  cl_crosshair_outlinethickness: { min: 0, max: 3 },
-});
+// Seit dem CS2-Update vom 2026-09-22 (neues Crosshair-System) werden die Felder
+// aus dem gemeinsamen Cvar-Modell in cvars.js abgeleitet: Ranges, Steps und
+// Defaults kommen ausschliesslich von dort. Das Spiel clampt hart auf diese
+// Ranges, deshalb sind Slider und Number-Inputs identisch begrenzt.
 
-// CS2 crosshair styles — nur die im Spiel ueber das Settings-Menue verfuegbaren
-// Werte. Default (0), Default Static (1) und Classic Dynamic (3) zeigen sich in
-// CS2 nicht im UI und werden hier weggelassen.
-const STYLE_OPTIONS = [
-  { value: 2, label: 'Classic' },
-  { value: 4, label: 'Classic Static' },
-  { value: 5, label: 'Legacy' },
-];
+import {
+  CVARS, STYLES, OUTLINE_MODES, isRelevant, defaultParams,
+} from './cvars.js';
+
+// Range/Step eines Cvars aus dem Modell lesen (Integer-Cvars: step 1).
+function lim(key) {
+  const spec = CVARS[key];
+  return { min: spec.min, max: spec.max, step: spec.step ?? 1 };
+}
 
 const STYLE_INFO_HTML = `
-<p><strong>Classic:</strong> dynamic crosshair with straight lines that expand when moving and crouching, and move to a lesser extent when shooting and switching weapons. Handy for learning the game's mechanics, but can be distracting.</p>
-<p><strong>Classic Static:</strong> never moves. By far the most preferred option for experienced players.</p>
-<p><strong>Legacy:</strong> only extends when firing your weapon, indicating spread (somewhat). Sometimes used by pros, but generally inferior to Classic Static.</p>
+<p><strong>Static Cross:</strong> classic four-line crosshair, never moves. The most common choice for experienced players.</p>
+<p><strong>Static Circle:</strong> a fixed ring instead of lines.</p>
+<p><strong>Static Square:</strong> a fixed square outline instead of lines (added 2026-09-24).</p>
+<p><strong>Dot Only:</strong> just the center dot — length, gap and T-style have no effect.</p>
+<p><strong>Dynamic Cross:</strong> four lines that spread with movement, crouching and shooting, up to the spread limit.</p>
+<p><strong>Dynamic Circle:</strong> a ring that grows with your inaccuracy.</p>
+<p><strong>Dynamic Cross (Classic):</strong> the old style 2 — lines split into an inner and outer part while moving (split distance / alpha / ratio settings below).</p>
+<p><strong>Dynamic Cross (Legacy/Shot Feedback):</strong> only expands while firing, indicating spread.</p>
+<p><strong>Dynamic Quad:</strong> a static cross plus four diagonal arcs that show your current inaccuracy.</p>
+<p>All values are pixels at the reference height (<code>cl_crosshair_screen_height</code>); the game scales them proportionally to your actual screen height.</p>
 `;
 
+// Editor-Felder in Anzeige-Reihenfolge. Ranges IMMER via lim() aus CVARS.
 const FIELDS = [
   {
-    type: 'segmented',
+    type: 'select',
     key: 'cl_crosshairstyle',
     label: 'Style (cl_crosshairstyle)',
-    options: STYLE_OPTIONS,
+    options: STYLES,
     infoHtml: STYLE_INFO_HTML,
   },
+  { type: 'slider', key: 'cl_crosshair_length',    label: 'Length (cl_crosshair_length)',       ...lim('cl_crosshair_length') },
+  { type: 'slider', key: 'cl_crosshair_thickness', label: 'Thickness (cl_crosshair_thickness)', ...lim('cl_crosshair_thickness') },
+  { type: 'slider', key: 'cl_crosshair_gap',       label: 'Gap (cl_crosshair_gap)',             ...lim('cl_crosshair_gap') },
+  { type: 'toggle', key: 'cl_crosshairdot',     label: 'Center Dot (cl_crosshairdot)' },
+  { type: 'toggle', key: 'cl_crosshair_t',      label: 'T-Style (cl_crosshair_t)' },
+  { type: 'toggle', key: 'cl_crosshair_recoil', label: 'Follow Recoil (cl_crosshair_recoil)' },
   {
-    type: 'slider',
-    key: 'cl_crosshairsize',
-    label: 'Size (cl_crosshairsize)',
-    min: 0, max: 500, step: 0.1,
-  },
-  {
-    type: 'slider',
-    key: 'cl_crosshairthickness',
-    label: 'Thickness (cl_crosshairthickness)',
-    min: 0, max: 500, step: 0.1,
-  },
-  {
-    type: 'slider',
-    key: 'cl_crosshairgap',
-    label: 'Gap (cl_crosshairgap)',
-    // Integer-Step: CS2 rendert Rects mit Integer-Pixel-Koordinaten,
-    // fraktioneller Gap macht visuell oft keinen Unterschied. Existierende
-    // Dezimal-Werte (z.B. -4.3 vom alten gruenen Default) werden beim
-    // Editieren auf den naechsten Integer gerundet.
-    min: -500, max: 500, step: 1,
-  },
-  { type: 'toggle', key: 'cl_crosshairdot', label: 'Center Dot (cl_crosshairdot)' },
-  { type: 'toggle', key: 'cl_crosshair_t',  label: 'T-Style (cl_crosshair_t)' },
-  { type: 'toggle', key: 'cl_crosshair_recoil', label: 'Recoil (cl_crosshair_recoil)' },
-  { type: 'toggle', key: 'cl_crosshair_drawoutline', label: 'Draw Outline (cl_crosshair_drawoutline)' },
-  {
-    type: 'slider',
-    key: 'cl_crosshair_outlinethickness',
-    label: 'Outline Thickness (cl_crosshair_outlinethickness)',
-    min: 0, max: 3, step: 1,
-  },
-  { type: 'toggle', key: 'cl_crosshairusealpha', label: 'Use Alpha (cl_crosshairusealpha)' },
-  {
-    type: 'slider',
-    key: 'cl_crosshairalpha',
-    label: 'Alpha (cl_crosshairalpha)',
-    min: 0, max: 255, step: 1,
+    type: 'segmented',
+    key: 'cl_crosshair_drawoutline',
+    label: 'Outline (cl_crosshair_drawoutline)',
+    options: OUTLINE_MODES,
   },
   { type: 'rgb', key: 'rgb', label: 'Color (RGB)' },
+  { type: 'slider', key: 'cl_crosshaircolor_a', label: 'Alpha (cl_crosshaircolor_a)', ...lim('cl_crosshaircolor_a') },
+  {
+    type: 'group',
+    key: 'group-dynamic',
+    label: 'Dynamic',
+    children: [
+      { type: 'slider', key: 'cl_crosshair_dynamic_spread_limit', label: 'Spread limit (cl_crosshair_dynamic_spread_limit)', ...lim('cl_crosshair_dynamic_spread_limit') },
+    ],
+  },
+  {
+    type: 'group',
+    key: 'group-classic',
+    label: 'Classic split (Style 2)',
+    children: [
+      { type: 'slider', key: 'cl_crosshair_dynamic_splitdist',           label: 'Split distance (cl_crosshair_dynamic_splitdist)',       ...lim('cl_crosshair_dynamic_splitdist') },
+      { type: 'slider', key: 'cl_crosshair_dynamic_splitalpha_innermod', label: 'Inner alpha (cl_crosshair_dynamic_splitalpha_innermod)', ...lim('cl_crosshair_dynamic_splitalpha_innermod') },
+      { type: 'slider', key: 'cl_crosshair_dynamic_splitalpha_outermod', label: 'Outer alpha (cl_crosshair_dynamic_splitalpha_outermod)', ...lim('cl_crosshair_dynamic_splitalpha_outermod') },
+      { type: 'slider', key: 'cl_crosshair_dynamic_maxdist_splitratio',  label: 'Split ratio (cl_crosshair_dynamic_maxdist_splitratio)', ...lim('cl_crosshair_dynamic_maxdist_splitratio') },
+    ],
+  },
+  {
+    type: 'group',
+    key: 'group-advanced',
+    label: 'Advanced',
+    children: [
+      {
+        type: 'number',
+        key: 'cl_crosshair_screen_height',
+        label: 'Reference screen height (px) (cl_crosshair_screen_height)',
+        note: 'The game sets this automatically to your current resolution as soon as length, thickness or gap are changed in-game.',
+        ...lim('cl_crosshair_screen_height'),
+      },
+    ],
+  },
 ];
 
 function el(tag, attrs, children) {
@@ -105,7 +113,7 @@ function buildSlider(field, params, onChange) {
   const wrap = el('div', { class: 'field' });
   wrap.appendChild(el('label', null, field.label));
   const row = el('div', { class: 'field-row' });
-  const initial = clampStep(params[field.key] ?? field.min, field.min, field.max, field.step);
+  const initial = clampStep(params[field.key] ?? CVARS[field.key].default, field.min, field.max, field.step);
   // Always store the clamped value so reading state never returns out-of-range
   params[field.key] = initial;
 
@@ -151,6 +159,42 @@ function buildSlider(field, params, onChange) {
   row.appendChild(slider);
   row.appendChild(num);
   wrap.appendChild(row);
+  return wrap;
+}
+
+// Reiner Number-Input (ohne Slider), z.B. fuer die Bezugshoehe 240..65535.
+function buildNumber(field, params, onChange) {
+  const wrap = el('div', { class: 'field' });
+  wrap.appendChild(el('label', null, field.label));
+  const initial = clampStep(params[field.key] ?? CVARS[field.key].default, field.min, field.max, field.step);
+  params[field.key] = initial;
+
+  const num = el('input', {
+    type: 'number', min: field.min, max: field.max, step: field.step,
+    value: initial,
+  });
+  num.addEventListener('input', () => {
+    const v = Number(num.value);
+    if (Number.isFinite(v)) {
+      params[field.key] = clamp(v, field.min, field.max);
+      onChange();
+    }
+  });
+  num.addEventListener('blur', () => {
+    const v = Number(num.value);
+    if (!Number.isFinite(v)) {
+      num.value = String(params[field.key] ?? field.min);
+      return;
+    }
+    const snapped = clampStep(v, field.min, field.max, field.step);
+    if (snapped !== v) {
+      num.value = String(snapped);
+      params[field.key] = snapped;
+      onChange();
+    }
+  });
+  wrap.appendChild(num);
+  if (field.note) wrap.appendChild(el('div', { class: 'field-note' }, field.note));
   return wrap;
 }
 
@@ -264,14 +308,18 @@ function buildInfoButton(html) {
   return btn;
 }
 
-function buildSegmented(field, params, onChange) {
-  const wrap = el('div', { class: 'field' });
+function buildLabelRow(field) {
   const labelRow = el('div', { class: 'label-row' });
   const labelEl = el('label', null, field.label);
   labelEl.style.margin = '0';
   labelRow.appendChild(labelEl);
   if (field.infoHtml) labelRow.appendChild(buildInfoButton(field.infoHtml));
-  wrap.appendChild(labelRow);
+  return labelRow;
+}
+
+function buildSegmented(field, params, onChange) {
+  const wrap = el('div', { class: 'field' });
+  wrap.appendChild(buildLabelRow(field));
   const seg = el('div', { class: 'segmented' });
   for (const rawOpt of field.options) {
     const opt = typeof rawOpt === 'object' ? rawOpt : { value: rawOpt, label: String(rawOpt) };
@@ -289,10 +337,30 @@ function buildSegmented(field, params, onChange) {
   return wrap;
 }
 
+// <select> fuer Enum-Cvars mit vielen Optionen (Style: 9 Eintraege, Labels zu
+// lang fuer eine Segmented-Control in der 360px-Editor-Spalte).
+function buildSelect(field, params, onChange) {
+  const wrap = el('div', { class: 'field' });
+  wrap.appendChild(buildLabelRow(field));
+  const select = el('select', { class: 'field-select' });
+  const current = params[field.key] ?? CVARS[field.key].default;
+  for (const opt of field.options) {
+    const o = el('option', { value: String(opt.value) }, `${opt.label} (${opt.value})`);
+    if (opt.value === current) o.selected = true;
+    select.appendChild(o);
+  }
+  select.addEventListener('change', () => {
+    params[field.key] = Number(select.value);
+    onChange();
+  });
+  wrap.appendChild(select);
+  return wrap;
+}
+
 function buildRgb(_field, params, onChange) {
   const wrap = el('div', { class: 'field' });
   wrap.appendChild(el('label', null, 'Color (RGB 0-255)'));
-  const row = el('div', { style: 'display:grid; grid-template-columns: auto 1fr 1fr 1fr; gap:6px; align-items:center;' });
+  const row = el('div', { class: 'rgb-row' });
 
   const picker = el('input', { type: 'color', value: rgbToHex(params) });
   row.appendChild(picker);
@@ -329,111 +397,66 @@ function buildRgb(_field, params, onChange) {
   return wrap;
 }
 
-function buildOptionalNumber(field, params, onChange) {
-  const wrap = el('div', { class: 'field' });
-  const has = params[field.key] !== null && params[field.key] !== undefined;
-  const initial = has ? clampStep(params[field.key], field.min, field.max, field.step) : 3;
-  if (has) params[field.key] = initial;
-
-  const row = el('div', { class: 'field-row' });
-  const label = el('label', null, field.label);
-  const toggleLbl = el('label', { class: 'toggle' });
-  const tog = el('input', { type: 'checkbox' });
-  if (has) tog.checked = true;
-  toggleLbl.appendChild(tog);
-  toggleLbl.appendChild(el('span', { class: 'toggle-slider' }));
-
-  const num = el('input', {
-    type: 'number', step: field.step, min: field.min, max: field.max,
-    value: initial,
-  });
-  if (!has) num.disabled = true;
-
-  tog.addEventListener('change', () => {
-    if (tog.checked) {
-      params[field.key] = clampStep(Number(num.value), field.min, field.max, field.step);
-      num.value = String(params[field.key]);
-      num.disabled = false;
-    } else {
-      params[field.key] = null;
-      num.disabled = true;
-    }
-    onChange();
-  });
-  num.addEventListener('input', () => {
-    if (!tog.checked) return;
-    const v = Number(num.value);
-    if (Number.isFinite(v)) {
-      params[field.key] = clamp(v, field.min, field.max);
-      onChange();
-    }
-  });
-  num.addEventListener('blur', () => {
-    if (!tog.checked) return;
-    const v = Number(num.value);
-    if (!Number.isFinite(v)) {
-      num.value = String(params[field.key] ?? field.min);
-      return;
-    }
-    const snapped = clampStep(v, field.min, field.max, field.step);
-    if (snapped !== v) {
-      num.value = String(snapped);
-      params[field.key] = snapped;
-      onChange();
-    }
-  });
-
-  wrap.appendChild(label);
-  wrap.appendChild(toggleLbl);
-  wrap.appendChild(num);
-  return wrap;
-}
-
-function buildAdvanced(field, params, onChange) {
+// Aufklappbereich (Dynamic / Classic split / Advanced).
+function buildGroup(field, params, onChange, registry) {
   const det = el('details', { class: 'advanced' });
   det.appendChild(el('summary', null, field.label));
   for (const child of field.children) {
-    det.appendChild(buildField(child, params, onChange));
+    det.appendChild(buildField(child, params, onChange, registry));
   }
   return det;
 }
 
-function buildField(field, params, onChange) {
+function buildField(field, params, onChange, registry) {
+  let node;
   switch (field.type) {
-    case 'slider': return buildSlider(field, params, onChange);
-    case 'toggle': return buildToggle(field, params, onChange);
-    case 'segmented': return buildSegmented(field, params, onChange);
-    case 'rgb': return buildRgb(field, params, onChange);
-    case 'optionalNumber': return buildOptionalNumber(field, params, onChange);
-    case 'advanced': return buildAdvanced(field, params, onChange);
+    case 'slider':    node = buildSlider(field, params, onChange); break;
+    case 'number':    node = buildNumber(field, params, onChange); break;
+    case 'toggle':    node = buildToggle(field, params, onChange); break;
+    case 'segmented': node = buildSegmented(field, params, onChange); break;
+    case 'select':    node = buildSelect(field, params, onChange); break;
+    case 'rgb':       node = buildRgb(field, params, onChange); break;
+    case 'group':     node = buildGroup(field, params, onChange, registry); break;
+    default:          node = el('div');
   }
-  return el('div');
+  // Fuer die Style-abhaengige Ausgrauung merken: Feld -> betroffene Cvar-Keys.
+  const keys = field.type === 'group'
+    ? field.children.map((c) => c.key).filter((k) => k in CVARS)
+    : (field.key in CVARS ? [field.key] : []);
+  if (keys.length > 0) registry.push({ node, keys });
+  return node;
+}
+
+// Felder ausgrauen, die fuer den gewaehlten Style im Spiel keine Wirkung haben.
+// Werte bleiben erhalten; nur Optik + Bedienbarkeit werden abgeschaltet.
+function applyRelevance(registry, style) {
+  for (const { node, keys } of registry) {
+    const inactive = keys.every((k) => !isRelevant(k, style));
+    node.classList.toggle('field--inactive', inactive);
+    node.querySelectorAll('input, select, button').forEach((inp) => { inp.disabled = inactive; });
+    // Gruppe: alle Felder inaktiv -> Summary bleibt bedienbar (details ist
+    // kein Form-Control), Inhalt wird per CSS ausgegraut.
+    if (inactive) node.setAttribute('aria-disabled', 'true');
+    else node.removeAttribute('aria-disabled');
+  }
 }
 
 export function buildEditor(host, params, onChange) {
   host.innerHTML = '';
+  const registry = [];
+  const notify = () => {
+    applyRelevance(registry, params.cl_crosshairstyle);
+    onChange();
+  };
   for (const field of FIELDS) {
-    host.appendChild(buildField(field, params, onChange));
+    host.appendChild(buildField(field, params, notify, registry));
   }
+  applyRelevance(registry, params.cl_crosshairstyle);
 }
 
-export const DEFAULT_PARAMS = Object.freeze({
-  cl_crosshairstyle: 4,
-  cl_crosshairsize: 4,
-  cl_crosshairthickness: 1.2,
-  cl_crosshairgap: -2,
-  cl_crosshairdot: 0,
-  cl_crosshair_t: 0,
-  cl_crosshair_recoil: 0,
-  cl_crosshair_drawoutline: 1,
-  cl_crosshair_outlinethickness: 1,
-  cl_crosshairusealpha: 1,
-  cl_crosshairalpha: 220,
-  cl_crosshaircolor_r: 0,
-  cl_crosshaircolor_g: 255,
-  cl_crosshaircolor_b: 0,
-  cl_crosshair_dynamic_splitdist: null,
-});
+// Client-Defaults = Cvar-Defaults des Spiels. Die Startwerte der Public-Seite
+// kommen vom Server (/api/public/defaults) und ueberschreiben diese.
+export const DEFAULT_PARAMS = Object.freeze(defaultParams());
 
 export function clone(obj) {
   return JSON.parse(JSON.stringify(obj));
@@ -442,12 +465,13 @@ export function clone(obj) {
 function clamp(v, min, max) { return Math.min(Math.max(v, min), max); }
 
 // Quantisiere v auf das nächste Vielfache von step. Verhindert Werte wie 0.01
-// bei step=0.1 — sonst sind manche Crosshairs in CS2 unsichtbar.
+// bei step=0.05 — sonst weicht die Preview vom Spiel ab.
 function quantize(v, step) {
   if (!Number.isFinite(step) || step <= 0) return v;
   const decimals = step < 1 ? Math.max(0, -Math.floor(Math.log10(step))) : 0;
   const factor = Math.pow(10, decimals);
-  return Math.round(v * factor) / factor;
+  const q = Math.round(v / step) * step;
+  return Math.round(q * factor) / factor;
 }
 
 function clampStep(v, min, max, step) {

@@ -5,6 +5,7 @@ import { renderCrosshair, ensureSvg } from './preview.js';
 import { api } from './api.js';
 import { toast } from './toast.js';
 import { confirmDialog } from './confirm.js';
+import { migratedBadge } from './admin-presets.js';
 
 const as = {
   list: [],
@@ -90,6 +91,7 @@ function renderRow(sub) {
     <div class="sub">by ${escapeHtml(sub.submitterName)}</div>
     <div class="date">${relativeTime(sub.submittedAt)}</div>
   `;
+  if (sub.migrated) meta.querySelector('.name').appendChild(migratedBadge());
   row.appendChild(meta);
 
   const actions = document.createElement('div');
@@ -121,6 +123,7 @@ async function loadToPresets(sub) {
         name,
         params: { ...sub.params },
         submittedBy: sub.submitterName,
+        ...(sub.migrated ? { migrated: true } : {}),
       }],
     };
     await api.put('/api/admin/state', next);

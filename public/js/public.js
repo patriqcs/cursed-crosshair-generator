@@ -1,4 +1,6 @@
 import { buildEditor, DEFAULT_PARAMS, clone } from './editor.js';
+import { normalizeParams, isLegacyParams } from './cvars.js';
+import { migrateLegacyParams } from './migrate.js';
 import { renderCrosshair, ensureSvg, registerForRerender } from './preview.js';
 import { api } from './api.js';
 import { toast } from './toast.js';
@@ -43,7 +45,12 @@ async function loadDefaults() {
   try {
     const def = await api.get('/api/public/defaults');
     if (def && def.params) {
-      state.params = { ...clone(DEFAULT_PARAMS), ...def.params };
+      // Defensiv: liefert der Server noch alte Cvars, umrechnen statt kaputte
+      // Params in den Editor zu laden.
+      const p = isLegacyParams(def.params)
+        ? migrateLegacyParams(def.params, { screenHeight: 1080 })
+        : normalizeParams(def.params);
+      if (p) state.params = p;
     }
   } catch (_err) {
     // ignore — keep client defaults
@@ -161,7 +168,7 @@ function bindEvents() {
     openShareCodeModal({
       getParams: () => state.params,
       setParams: (newParams) => {
-        // Merge to keep keys we don't decode (e.g. cl_crosshair_dynamic_splitdist may stay null)
+        // Merge: Konsolen-Commands koennen ein Teil-Set sein, Share-Codes sind komplett.
         state.params = { ...clone(DEFAULT_PARAMS), ...state.params, ...newParams };
         rebuildEditor();
         rerender();
