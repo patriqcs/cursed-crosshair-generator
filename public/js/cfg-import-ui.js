@@ -143,13 +143,21 @@ export function openCfgImportModal({ getState, applyImport }) {
       const label = document.createElement('div');
       label.style.cssText = 'font-size: 12px; margin-top: 6px; word-break: break-word;';
       label.textContent = preset.name + (preset.submittedBy ? ` (by ${preset.submittedBy})` : '');
+      if (preset.migrated) {
+        const badge = document.createElement('span');
+        badge.className = 'badge-migrated';
+        badge.textContent = 'migriert – prüfen';
+        label.appendChild(badge);
+      }
       tile.appendChild(label);
       previewList.appendChild(tile);
     }
 
     const meta = [];
-    if (parsed.restore) meta.push('Restore crosshair: parsed');
+    if (parsed.restore) meta.push(parsed.restore.migrated ? 'Restore crosshair: parsed (migrated)' : 'Restore crosshair: parsed');
     if (parsed.keys)    meta.push(`Keys: next=${parsed.keys.next}, restore=${parsed.keys.restore}`);
+    const anyMigrated = parsed.presets.some((p) => p.migrated) || (parsed.restore && parsed.restore.migrated);
+    if (anyMigrated) meta.push('Old cfg (before the CS2 update of 2026-09-22) — values were converted to the new pixel system, please check them.');
     metaEl.textContent = meta.join(' · ');
   }
 

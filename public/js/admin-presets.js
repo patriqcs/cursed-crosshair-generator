@@ -1,4 +1,5 @@
-import { buildEditor, clone } from './editor.js';
+import { buildEditor, DEFAULT_PARAMS, clone } from './editor.js';
+import { STYLES } from './cvars.js';
 import { renderCrosshair, ensureSvg, registerForRerender } from './preview.js';
 import { api } from './api.js';
 import { toast } from './toast.js';
@@ -49,6 +50,22 @@ async function saveStateNow() {
   }
 }
 
+// Style-Wert -> Label aus dem Cvar-Modell (z.B. 4 -> "Static Cross").
+function styleLabel(style) {
+  const s = STYLES.find((x) => x.value === Number(style));
+  return s ? s.label : `style ${style}`;
+}
+
+// Kleines Badge fuer Presets/Submissions, deren Werte aus dem alten
+// Crosshair-System (vor 2026-09-22) umgerechnet wurden.
+export function migratedBadge() {
+  const b = document.createElement('span');
+  b.className = 'badge-migrated';
+  b.textContent = 'migriert – prüfen';
+  b.title = 'Werte wurden vom alten CS2-Crosshair-System umgerechnet — bitte im Spiel prüfen.';
+  return b;
+}
+
 function renderPresetList() {
   const host = document.getElementById('preset-list');
   host.innerHTML = '';
@@ -74,11 +91,12 @@ function renderPresetList() {
     name.textContent = preset.name;
     name.title = preset.name;
     meta.appendChild(name);
-    const subText = preset.submittedBy ? `by ${preset.submittedBy}` : `style ${preset.params.cl_crosshairstyle}`;
+    const subText = preset.submittedBy ? `by ${preset.submittedBy}` : styleLabel(preset.params.cl_crosshairstyle);
     const sub = document.createElement('div');
     sub.className = 'preset-sub';
     sub.textContent = subText;
     sub.title = subText;
+    if (preset.migrated) sub.appendChild(migratedBadge());
     meta.appendChild(sub);
     row.appendChild(meta);
 
@@ -137,6 +155,12 @@ function renderActiveEditor() {
   document.getElementById('active-preset-name').textContent = preset.name;
   document.getElementById('active-name').value = preset.name;
   buildEditor(host, preset.params, () => {
+    // Sobald der Admin das Preset im Editor anfasst, gilt es als geprueft:
+    // Migrations-Flag entfernen (wird dann auch nicht mehr mitgesendet).
+    if (preset.migrated) {
+      delete preset.migrated;
+      renderPresetList();
+    }
     renderActivePreview();
     autosaveLater();
   });
@@ -159,20 +183,16 @@ function updateCounter() {
 }
 
 function addPreset() {
+  // Restore-Crosshair als Ausgangspunkt; Presets und Restore teilen sich seit
+  // dem CS2-Update dasselbe Param-Schema.
+  const base = ps.data.restore && ps.data.restore.params && Object.keys(ps.data.restore.params).length > 0
+    ? ps.data.restore.params
+    : DEFAULT_PARAMS;
   const newPreset = {
     id: `tmp-${Date.now()}`,
     name: `Preset ${ps.data.presets.length + 1}`,
-    params: clone(ps.data.restore && ps.data.restore.params ? ps.data.restore.params : {}),
+    params: clone(base),
   };
-  // Strip restore-only keys so it validates as a regular preset
-  const RESTORE_ONLY = [
-    'cl_crosshairgap_useweaponvalue', 'cl_fixedcrosshairgap',
-    'cl_crosshair_dynamic_maxdist_splitratio',
-    'cl_crosshair_dynamic_splitalpha_innermod',
-    'cl_crosshair_dynamic_splitalpha_outermod',
-  ];
-  for (const k of RESTORE_ONLY) delete newPreset.params[k];
-  if (newPreset.params.cl_crosshair_dynamic_splitdist === undefined) newPreset.params.cl_crosshair_dynamic_splitdist = null;
   ps.data.presets = [...ps.data.presets, newPreset];
   ps.selectedId = newPreset.id;
   renderPresetList();
@@ -322,8 +342,7 @@ function setupRestoreModalControls() {
   registerForRerender(restorePreviewSvg, () => restoreDraft || null);
 
   // Import/Export-Code-Button. Importierte Params werden in den restoreDraft
-  // gemerged (statt zu ersetzen), damit restore-spezifische Felder wie
-  // cl_fixedcrosshairgap / cl_crosshair_dynamic_* erhalten bleiben.
+  // gemerged, weil Konsolen-Commands ein Teil-Set sein koennen.
   const scBtn = document.getElementById('restore-sharecode-btn');
   if (scBtn) {
     scBtn.addEventListener('click', () => {
@@ -425,6 +444,7 @@ export async function initPresetsTab() {
       getParams: () => preset.params,
       setParams: (newParams) => {
         preset.params = { ...preset.params, ...newParams };
+        delete preset.migrated;
         renderActiveEditor();
         renderActivePreview();
         renderPresetList();
@@ -442,13 +462,14 @@ export async function initPresetsTab() {
           name: p.name,
           params: p.params,
           ...(p.submittedBy ? { submittedBy: p.submittedBy } : {}),
+          ...(p.migrated ? { migrated: true } : {}),
         }));
         if (mode === 'replace') {
           ps.data.presets = newPresets;
         } else {
           ps.data.presets = [...ps.data.presets, ...newPresets];
         }
-        if (replaceRestore && parsed.restore) ps.data.restore = parsed.restore;
+        if (replaceRestore && parsed.restore) ps.data.restore = { params: parsed.restore.params };
         if (replaceKeys && parsed.keys)       ps.data.keys = parsed.keys;
         ps.selectedId = newPresets.length > 0 ? newPresets[0].id : ps.selectedId;
         renderPresetList();
@@ -457,6 +478,10 @@ export async function initPresetsTab() {
         updateCounter();
         await saveStateNow();
         toast(`Imported ${newPresets.length} preset${newPresets.length === 1 ? '' : 's'}`, 'ok');
+        const migratedCount = newPresets.filter((p) => p.migrated).length;
+        if (migratedCount > 0 || (replaceRestore && parsed.restore && parsed.restore.migrated)) {
+          toast('Alte cfg (vor dem CS2-Update vom 22.09.2026) — Werte umgerechnet, bitte prüfen', 'warn', 6000);
+        }
       },
     });
   });

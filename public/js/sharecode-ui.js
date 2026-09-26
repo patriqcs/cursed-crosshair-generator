@@ -2,7 +2,13 @@
 
 import { encode, decode } from './sharecode.js';
 import { parseCommands, formatCommands } from './commands.js';
+import { normalizeParams, normalizeValue, isLegacyParams, CVAR_KEYS } from './cvars.js';
+import { migrateLegacyParams } from './migrate.js';
 import { toast } from './toast.js';
+
+// Bezugshoehe fuer die Umrechnung alter Codes/Commands (vor 2026-09-22).
+const LEGACY_SCREEN_HEIGHT = 1080;
+const LEGACY_HINT = 'Alter Code (vor dem CS2-Update vom 22.09.2026) — umgerechnet, bitte Werte prüfen';
 
 function htmlToFragment(html) {
   const tpl = document.createElement('template');
@@ -28,7 +34,7 @@ const MODAL_HTML = `
         <textarea data-role="sc-input" rows="6" autocomplete="off" spellcheck="false"
           placeholder="CSGO-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX
 or
-cl_crosshairstyle 4; cl_crosshairsize 5; cl_crosshairthickness 1; ..."
+cl_crosshairstyle 4; cl_crosshair_length 8; cl_crosshair_thickness 2; cl_crosshair_gap 4; ..."
           style="width:100%; resize:vertical; font-family:monospace; font-size:12px;
                  background:var(--bg); color:var(--text); border:1px solid var(--border);
                  border-radius:var(--radius-sm); padding:8px 10px;"></textarea>
@@ -119,6 +125,18 @@ export function openShareCodeModal({ getParams, setParams }) {
   const input = root.querySelector('[data-role="sc-input"]');
   const msg = root.querySelector('[data-role="sc-msg"]');
 
+  // Konsolen-Commands koennen ein Teil-Set sein: nur die vorhandenen Keys
+  // normalisieren, der Aufrufer merged sie in die aktuellen Params.
+  function normalizePartial(raw) {
+    const out = {};
+    for (const k of CVAR_KEYS) {
+      if (raw[k] === undefined) continue;
+      const v = normalizeValue(k, raw[k]);
+      if (v !== null) out[k] = v;
+    }
+    return Object.keys(out).length > 0 ? out : null;
+  }
+
   function applyImport() {
     const raw = input.value;
     if (!raw || !raw.trim()) {
@@ -129,19 +147,37 @@ export function openShareCodeModal({ getParams, setParams }) {
 
     let imported = null;
     let kind = '';
-    if (looksLikeShareCode(raw)) {
-      imported = decode(raw.trim());
+    let legacy = false;
+
+    const tryShareCode = () => {
+      const dec = decode(raw.trim());
+      if (!dec) return false;
       kind = 'share code';
-    }
-    if (!imported) {
-      imported = parseCommands(raw);
-      if (imported) kind = 'console commands';
-    }
+      if (dec.version === 1) {
+        legacy = true;
+        imported = migrateLegacyParams(dec.params, { screenHeight: LEGACY_SCREEN_HEIGHT });
+      } else {
+        imported = normalizeParams(dec.params);
+      }
+      return Boolean(imported);
+    };
+    const tryCommands = () => {
+      const parsed = parseCommands(raw);
+      if (!parsed) return false;
+      kind = 'console commands';
+      if (isLegacyParams(parsed)) {
+        legacy = true;
+        imported = migrateLegacyParams(parsed, { screenHeight: LEGACY_SCREEN_HEIGHT });
+      } else {
+        imported = normalizePartial(parsed);
+      }
+      return Boolean(imported);
+    };
+
+    if (looksLikeShareCode(raw)) tryShareCode();
+    if (!imported) tryCommands();
     // Last-ditch: try sharecode even if regex didn't match (whitespace, etc.)
-    if (!imported) {
-      imported = decode(raw.trim());
-      if (imported) kind = 'share code';
-    }
+    if (!imported) tryShareCode();
 
     if (!imported) {
       msg.textContent = 'Could not parse — input is neither a valid share code nor recognised commands.';
@@ -149,11 +185,12 @@ export function openShareCodeModal({ getParams, setParams }) {
       return;
     }
 
-    msg.textContent = `Imported (${kind}).`;
-    msg.style.color = 'var(--green)';
+    msg.textContent = legacy ? `Imported (${kind}, migrated).` : `Imported (${kind}).`;
+    msg.style.color = legacy ? 'var(--warn)' : 'var(--green)';
     setParams(imported);
-    toast(`Crosshair imported from ${kind}`, 'ok');
-    setTimeout(close, 200);
+    if (legacy) toast(LEGACY_HINT, 'warn', 6000);
+    else toast(`Crosshair imported from ${kind}`, 'ok');
+    setTimeout(close, legacy ? 600 : 200);
   }
   root.querySelector('[data-act="apply"]').addEventListener('click', applyImport);
   input.addEventListener('keydown', (e) => {

@@ -224,6 +224,10 @@ app.put('/api/admin/state', (req, res) => {
         const sn = validation.sanitizePresetName(p.submittedBy.trim());
         if (sn) preset.submittedBy = sn;
       }
+      // `migrated` (Marker der automatischen CS2-Update-Migration) bleibt nur
+      // erhalten, wenn der Client ihn mitschickt; ein explizites Speichern ohne
+      // Flag entfernt ihn.
+      if (p.migrated === true) preset.migrated = true;
       validatedPresets.push(preset);
     }
     next = { ...next, presets: validatedPresets };
@@ -232,6 +236,7 @@ app.put('/api/admin/state', (req, res) => {
   if (incoming.restore) {
     const valRestore = state.validateRestoreInput(incoming.restore);
     if (!valRestore) return res.status(400).json({ error: 'invalid_restore' });
+    if (incoming.restore.migrated === true) valRestore.migrated = true;
     next = { ...next, restore: valRestore };
   }
 
@@ -263,6 +268,10 @@ app.put('/api/admin/presets/:id', (req, res) => {
   if (!valPreset) return res.status(400).json({ error: 'invalid_preset' });
   const previous = cur.presets[idx];
   const updated = { ...previous, name: valPreset.name, params: valPreset.params };
+  // Explizites Speichern aus der Admin-UI loescht den Migrations-Marker, sofern
+  // der Client ihn nicht ausdruecklich mitschickt.
+  delete updated.migrated;
+  if (req.body && req.body.migrated === true) updated.migrated = true;
   const presets = cur.presets.map((p, i) => (i === idx ? updated : p));
   state.writeState({ ...cur, presets });
   res.json(updated);
@@ -322,6 +331,9 @@ app.put('/api/admin/submissions/:id', (req, res) => {
   if (!params) return res.status(400).json({ error: 'invalid_params' });
 
   const updated = { ...data.submissions[idx], presetName, params };
+  // Siehe PUT /api/admin/presets/:id — Migrations-Marker nur auf Wunsch behalten.
+  delete updated.migrated;
+  if (incoming.migrated === true) updated.migrated = true;
   const submissions = data.submissions.map((s, i) => (i === idx ? updated : s));
   state.writeSubmissions({ ...data, submissions });
   res.json(updated);

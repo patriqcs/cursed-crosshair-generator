@@ -115,28 +115,33 @@ Two JSON files in `/data/`, each written atomically.
 
 `status`: `pending` | `approved` | `rejected`.
 
-**Param schema** (used in both files):
+**Param schema** (used in both files, identical for presets, submissions AND restore — CS2 crosshair system since the game update of 2026-09-22, pixel units; single source of truth: `public/js/cvars.js`):
 ```js
 {
-  cl_crosshairstyle: 0..5,
-  cl_crosshairsize: number,           // allow 0.01 .. 999
-  cl_crosshairthickness: number,
-  cl_crosshairgap: number,            // allow -999 .. 9999
+  cl_crosshairstyle: 0..8,                         // enum (4 = Static Cross, 0 = Dynamic Cross, ...)
+  cl_crosshair_length: 0..255,                     // int, pixels at screen_height
+  cl_crosshair_thickness: 0..31,                   // int, pixels
+  cl_crosshair_gap: 0..128,                        // int, pixels (no negative gaps any more)
   cl_crosshairdot: 0|1,
   cl_crosshair_t: 0|1,
   cl_crosshair_recoil: 0|1,
-  cl_crosshair_drawoutline: 0|1,
-  cl_crosshair_outlinethickness: number,
-  cl_crosshairusealpha: 0|1,
-  cl_crosshairalpha: 0..255,
+  cl_crosshair_drawoutline: 0|1|2,                 // 0 none, 1 full, 2 half
   cl_crosshaircolor_r: 0..255,
   cl_crosshaircolor_g: 0..255,
   cl_crosshaircolor_b: 0..255,
-  cl_crosshair_dynamic_splitdist: number | null  // null = not emitted
+  cl_crosshaircolor_a: 0..255,
+  cl_crosshair_dynamic_spread_limit: 0..255,
+  cl_crosshair_dynamic_splitdist: 0..127,
+  cl_crosshair_dynamic_splitalpha_innermod: 0..1,    // float, step 0.05
+  cl_crosshair_dynamic_splitalpha_outermod: 0.3..1,  // float, step 0.05
+  cl_crosshair_dynamic_maxdist_splitratio: 0..1,     // float, step 0.01
+  cl_crosshair_screen_height: 240..65535             // int, reference height for the pixel values
 }
 ```
 
-The `restore` object additionally carries: `cl_crosshairgap_useweaponvalue`, `cl_fixedcrosshairgap`, `cl_crosshair_dynamic_maxdist_splitratio`, `cl_crosshair_dynamic_splitalpha_innermod`, `cl_crosshair_dynamic_splitalpha_outermod`, `cl_crosshair_dynamic_splitdist`.
+All 18 keys are always present after validation; missing keys get the cvar default. There are no restore-only extra fields any more. The old cvars (`cl_crosshairsize`, `cl_crosshairthickness`, `cl_crosshairgap`, `cl_crosshair_outlinethickness`, `cl_crosshairusealpha`, `cl_crosshairalpha`, `cl_crosshaircolor`, `cl_crosshairgap_useweaponvalue`, `cl_fixedcrosshairgap`) were removed by the game.
+
+**Automatic migration:** on the first `readState()` / `readSubmissions()` after the update, every entry whose params still use the old cvar set (`isLegacyParams`) is converted with `migrateLegacyParams(params, { screenHeight: 960 })` (`public/js/migrate.js`; 960 = the resolution the old presets were designed on). Before the file is rewritten it is copied to `<file>.pre-cs2-update-<YYYYMMDD>.bak` (only if that backup does not exist yet). Migrated entries get `"migrated": true` as a marker for the admin UI; the flag is dropped when the entry is saved again from the admin UI without it. The migration is idempotent. Independently of that, all params are passed through `normalizeParams` on every read.
 
 **First-run seed:** create `presets.json` with one starter preset and the green restore (Section 9). Create empty `submissions.json` with `{ "submissions": [] }`.
 
@@ -268,23 +273,24 @@ When a preset has `submittedBy`, append it to the echo line in the exported `.cf
 
 ## 10. Validation Rules (Server-Side)
 
-Apply on submission AND admin edits:
+Apply on submission AND admin edits (presets, submissions and restore share the same rules):
 
 - `submitterName`: 2–40 chars; trim; strip control chars + non-printable.
 - `presetName`: 2–60 chars; same sanitization; **also strip `"` and `;`** (would break the echo line / inject into the cfg).
-- params: clamp numeric ranges (use the schema in Section 6); reject NaN; coerce booleans (`0`/`1`/`true`/`false` → `0`/`1`); unknown keys ignored.
+- params: `validateParams()` is built on `normalizeParams` from `public/js/cvars.js` (since 2026-09-22): unknown keys are dropped; missing keys get the cvar default; numbers are **clamped** to the cvar range (never rejected because of range — enums too); floats are quantised to the cvar step; booleans are coerced (`0`/`1`/`true`/`false` → `0`/`1`); non-numeric values reject the whole object.
 - **Reject any field value containing `"` or `;`** — cfg injection guard, server side, even if client sanitized.
 
 ---
 
 ## 11. `.cfg` Export Format — EXACT Structure Required
 
-Source console has a per-alias string length limit, so each preset MUST be split into 3 chained aliases `_cN / _cNb / _cNc`. The output structure is non-negotiable:
+Source console has a per-alias string length limit, so each preset MUST be split into 3 chained aliases `_cN / _cNb / _cNc`. Since the CS2 crosshair update of 2026-09-22 all 18 cvars are always written; `cl_crosshair_screen_height` is a hidden cvar that the game overwrites on every length/thickness/gap change and therefore MUST be the last cvar of each chain. The client cfg parser is built on exactly this layout. The output structure is non-negotiable:
 
 ```
 // =======================================================
 //            CURSED CROSSHAIR CONFIG
 //            <N> PRESETS
+//            CS2 Crosshair-System seit 2026-09-22 (Pixel-Einheiten)
 // =======================================================
 
 echo " "
@@ -297,20 +303,19 @@ alias _setup_keys "unbind <next>; bind <next> cursed_next; unbind <restore>; bin
 
 // --- PRESETS ---
 // For each preset N (1-indexed):
-//   alias _cN  "cl_crosshairstyle X; cl_crosshairsize X; cl_crosshairthickness X; cl_crosshairgap X; cl_crosshairdot X; cl_crosshair_t X; cl_crosshair_recoil X; _cNb"
-//   alias _cNb "cl_crosshair_drawoutline X; cl_crosshair_outlinethickness X; cl_crosshairusealpha X; cl_crosshairalpha X[; cl_crosshair_dynamic_splitdist X]; _cNc"
-//   alias _cNc "cl_crosshaircolor 5; cl_crosshaircolor_r X; cl_crosshaircolor_g X; cl_crosshaircolor_b X; echo [CURSED #N] <NAME>[ (by <submittedBy>)]"
+//   alias _cN  "cl_crosshairstyle S; cl_crosshair_length L; cl_crosshair_thickness T; cl_crosshair_gap G; cl_crosshairdot D; cl_crosshair_t X; cl_crosshair_recoil R; _cNb"
+//   alias _cNb "cl_crosshair_drawoutline O; cl_crosshaircolor_r R; cl_crosshaircolor_g G; cl_crosshaircolor_b B; cl_crosshaircolor_a A; cl_crosshair_dynamic_spread_limit P; _cNc"
+//   alias _cNc "cl_crosshair_dynamic_splitdist S; cl_crosshair_dynamic_splitalpha_innermod I; cl_crosshair_dynamic_splitalpha_outermod O; cl_crosshair_dynamic_maxdist_splitratio R; cl_crosshair_screen_height H; echo [CURSED #N] <NAME>[ (by <submittedBy>)]"
 
 // --- ROTATION ---
 // alias _link1  "_c1;  alias cursed_next _link2"
 // ... through _linkN  "_cN;  alias cursed_next _link1"
 // alias cursed_next _link1
 
-// --- RESTORE ---
-// alias cursed_restore "cl_crosshairstyle X; cl_crosshairsize X; cl_crosshairthickness X; cl_crosshairgap X; cl_crosshairdot X; cl_crosshair_t X; _rb"
-// alias _rb "cl_crosshair_recoil X; cl_crosshairgap_useweaponvalue X; cl_fixedcrosshairgap X; cl_crosshair_drawoutline X; cl_crosshair_outlinethickness X; _rc"
-// alias _rc "cl_crosshaircolor 5; cl_crosshaircolor_r X; cl_crosshaircolor_g X; cl_crosshaircolor_b X; cl_crosshairusealpha X; cl_crosshairalpha X; _rd"
-// alias _rd "cl_crosshair_dynamic_maxdist_splitratio X; cl_crosshair_dynamic_splitalpha_innermod X; cl_crosshair_dynamic_splitalpha_outermod X; cl_crosshair_dynamic_splitdist X; echo [NORMAL] Gruenes Crosshair zurueck"
+// --- RESTORE (same layout as a preset, aliases cursed_restore / _rb / _rc) ---
+// alias cursed_restore "cl_crosshairstyle S; cl_crosshair_length L; cl_crosshair_thickness T; cl_crosshair_gap G; cl_crosshairdot D; cl_crosshair_t X; cl_crosshair_recoil R; _rb"
+// alias _rb "cl_crosshair_drawoutline O; cl_crosshaircolor_r R; cl_crosshaircolor_g G; cl_crosshaircolor_b B; cl_crosshaircolor_a A; cl_crosshair_dynamic_spread_limit P; _rc"
+// alias _rc "cl_crosshair_dynamic_splitdist S; cl_crosshair_dynamic_splitalpha_innermod I; cl_crosshair_dynamic_splitalpha_outermod O; cl_crosshair_dynamic_maxdist_splitratio R; cl_crosshair_screen_height H; echo [NORMAL] Gruenes Crosshair zurueck"
 
 // --- APPLY KEY BINDS ---
 _setup_keys
@@ -332,7 +337,8 @@ echo " "
 - `cursed_next` pointer is initialized to `_link1` so the first keypress shows preset #1.
 - On config load, `cursed_restore` runs (green default) — NOT the first cursed preset.
 - If a preset has `submittedBy`, append ` (by <submittedBy>)` to the echo line so it shows ingame on rotation.
-- `cl_crosshair_dynamic_splitdist` only emitted on `_cNb` when present in the preset's params.
+- Number format: integers without decimals, floats with at most 2 decimals, trailing zeros trimmed.
+- `cl_crosshair_screen_height` is always the last cvar of a chain (see above); no cvar is optional.
 
 ---
 
