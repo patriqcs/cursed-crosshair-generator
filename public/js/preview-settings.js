@@ -16,7 +16,7 @@ export const RESOLUTIONS = [
   { key: '2560x1440', w: 2560, h: 1440, label: '2560×1440' },
 ];
 const SPREAD_MAX = 320;
-const DEFAULTS = { zoom: 1, resolution: '1280x960', spreadPx: 0 };
+const DEFAULTS = { zoom: 1, resolution: '1920x1080', spreadPx: 0 };
 const KEYS = { zoom: 'ccg.preview.zoom', resolution: 'ccg.preview.resolution', spreadPx: 'ccg.preview.spread' };
 
 function read(key, validate) {
