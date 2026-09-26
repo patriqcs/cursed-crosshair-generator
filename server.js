@@ -74,11 +74,33 @@ app.use(cookieParser());
 app.use(auth.buildSessionMiddleware(SESSION_SECRET));
 
 // Static assets (public/ holds both public + admin SPA shells)
-app.use('/static', express.static(PUBLIC_DIR, {
+//
+// Cache-Busting: Cloudflare cacht /static/* mehrere Stunden (Edge-TTL). Damit ein
+// Deploy sofort greift, bekommen die Assets pro Serverstart einen eigenen Pfad
+// (/static-<build>/...). Die HTML-Shells werden beim Ausliefern darauf umgeschrieben;
+// relative ES-Module-Imports (./preview.js) folgen dem Prefix automatisch, sodass nie
+// alte und neue Module gemischt werden. /static bleibt fuer Bilder und Tooling erhalten.
+const BUILD_ID = (process.env.BUILD_ID && /^[a-z0-9]{4,32}$/i.test(process.env.BUILD_ID))
+  ? process.env.BUILD_ID
+  : require('node:crypto').createHash('sha1').update(`${require('./package.json').version}:${Date.now()}`).digest('hex').slice(0, 10);
+const ASSET_PREFIX = `/static-${BUILD_ID}`;
+app.use([ASSET_PREFIX, '/static'], express.static(PUBLIC_DIR, {
   fallthrough: true,
   maxAge: '1h',
   etag: true,
 }));
+
+// HTML-Shells einmal laden und Asset-Pfade auf den Build-Prefix umschreiben.
+const htmlCache = new Map();
+function sendShell(res, file) {
+  let html = htmlCache.get(file);
+  if (!html) {
+    html = fs.readFileSync(path.join(PUBLIC_DIR, file), 'utf8').split('/static/').join(`${ASSET_PREFIX}/`);
+    htmlCache.set(file, html);
+  }
+  res.set('Cache-Control', 'no-cache');
+  res.type('html').send(html);
+}
 
 // Rate limiters
 const loginLimiter = rateLimit({
@@ -116,7 +138,7 @@ const submitLimiter = rateLimit({
 // =========================================================================
 
 app.get('/', (_req, res) => {
-  res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+  sendShell(res, 'index.html');
 });
 
 app.get('/favicon.ico', (_req, res) => {
@@ -177,7 +199,7 @@ app.post('/api/submissions', submitLimiter, async (req, res) => {
 
 app.get('/admin/login', (req, res) => {
   if (req.session && req.session.user) return res.redirect('/admin');
-  res.sendFile(path.join(PUBLIC_DIR, 'login.html'));
+  sendShell(res, 'login.html');
 });
 
 app.post('/admin/login', loginLimiter, loginGlobalLimiter, (req, res) => {
@@ -205,7 +227,7 @@ app.post('/admin/logout', (req, res) => {
 
 // Protect admin routes from here on
 app.get('/admin', auth.requireAuth, (_req, res) => {
-  res.sendFile(path.join(PUBLIC_DIR, 'admin.html'));
+  sendShell(res, 'admin.html');
 });
 
 // Admin-Antworten nie cachen (Back/bfcache nach Logout, gemeinsame Browser).
