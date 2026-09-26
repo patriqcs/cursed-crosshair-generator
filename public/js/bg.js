@@ -78,40 +78,47 @@ function applyZoomToLayer(layer, zoom) {
 }
 
 // Apply background to a single .preview element.
-// Pixel-Cache des Hintergrunds in Spielaufloesung (1280x960, "cover"-Fit wie
-// das CSS), damit der Renderer das Crosshair wie das Spiel in linearem Licht
-// auf den echten Hintergrund mischen kann. Key = slug.
-const BG_W = 1280, BG_H = 960;
-const bgPixelCache = new Map();
+// Pixel-Cache des Hintergrunds in der simulierten Spielaufloesung ("cover"-Fit wie
+// das CSS), damit der Renderer das Crosshair wie das Spiel in linearem Licht auf den
+// echten Hintergrund mischen kann. Key = slug@WxH; Bilder werden je slug einmal geladen.
+const bgImages = new Map();      // slug -> HTMLImageElement | null (Ladefehler)
+const bgPixelCache = new Map();  // "slug@WxH" -> ImageData | null
 const bgListeners = new Set();
 export function onBgChange(fn) { bgListeners.add(fn); return () => bgListeners.delete(fn); }
 function notifyBg() { for (const fn of bgListeners) { try { fn(); } catch (_e) { /* ignore */ } } }
 
-function cacheBgPixels(slug, url) {
-  if (bgPixelCache.has(slug)) { notifyBg(); return; }
+function loadBgImage(slug, url) {
+  if (bgImages.has(slug)) { notifyBg(); return; }
+  bgImages.set(slug, undefined); // wird geladen
   const img = new Image();
-  img.onload = () => {
-    try {
-      const c = document.createElement('canvas');
-      c.width = BG_W; c.height = BG_H;
-      const ctx = c.getContext('2d');
-      // background-size: cover; background-position: center
-      const scale = Math.max(BG_W / img.naturalWidth, BG_H / img.naturalHeight);
-      const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
-      ctx.drawImage(img, (BG_W - dw) / 2, (BG_H - dh) / 2, dw, dh);
-      bgPixelCache.set(slug, ctx.getImageData(0, 0, BG_W, BG_H));
-    } catch (_e) { bgPixelCache.set(slug, null); }
-    notifyBg();
-  };
-  img.onerror = () => { bgPixelCache.set(slug, null); notifyBg(); };
+  img.onload = () => { bgImages.set(slug, img); notifyBg(); };
+  img.onerror = () => { bgImages.set(slug, null); notifyBg(); };
   img.src = url;
 }
 
-// ImageData (1280x960) des aktiven Hintergrunds eines Preview-Elements, oder null
+function renderBgPixels(slug, W, H) {
+  const key = `${slug}@${W}x${H}`;
+  if (bgPixelCache.has(key)) return bgPixelCache.get(key);
+  const img = bgImages.get(slug);
+  if (!img) return null; // noch nicht geladen oder Fehler
+  try {
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const ctx = c.getContext('2d');
+    // background-size: cover; background-position: center
+    const scale = Math.max(W / img.naturalWidth, H / img.naturalHeight);
+    const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
+    ctx.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh);
+    bgPixelCache.set(key, ctx.getImageData(0, 0, W, H));
+  } catch (_e) { bgPixelCache.set(key, null); }
+  return bgPixelCache.get(key);
+}
+
+// ImageData (WxH) des aktiven Hintergrunds eines Preview-Elements, oder null
 // (Gradient-Fallback / noch nicht geladen).
-export function getBgPixels(previewEl) {
+export function getBgPixels(previewEl, W = 1280, H = 960) {
   const slug = previewEl && previewEl.dataset ? previewEl.dataset.bgSlug : null;
-  return slug ? (bgPixelCache.get(slug) || null) : null;
+  return slug ? renderBgPixels(slug, W, H) : null;
 }
 
 export function applyBg(previewEl, slug) {
@@ -129,7 +136,7 @@ export function applyBg(previewEl, slug) {
       layer.style.backgroundPosition = 'center';
       previewEl.classList.add('preview-with-bg');
       previewEl.dataset.bgSlug = bg.slug;
-      cacheBgPixels(bg.slug, url);
+      loadBgImage(bg.slug, url);
     },
     () => {
       layer.style.backgroundImage = bg.gradient;

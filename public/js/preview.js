@@ -10,11 +10,13 @@
 //      Compositing Fill ueber Outline, Ausgabe premultiplied.
 //      -> shadePixel().
 //
-// Gerendert wird per Canvas in echten Spielpixeln (SCREEN_W x SCREEN_H = die
-// 1280x960-Spielaufloesung des Streamers) und als <image> in das SVG gelegt,
-// dessen viewBox 1 Einheit = 1 Spielpixel ist (Zoom = viewBox-Crop).
+// Gerendert wird per Canvas in echten Spielpixeln der simulierten Aufloesung
+// (preview-settings: Default 1280x960, die Spielaufloesung des Streamers) und als
+// <image> in das SVG gelegt, dessen viewBox 1 Einheit = 1 Spielpixel ist
+// (Zoom = viewBox-Crop). Das Spiel skaliert die Cvar-Werte mit
+// Hoehe / cl_crosshair_screen_height — die Vorschau tut dasselbe (scalePx).
 
-import { onChange, getSettings } from './preview-settings.js';
+import { onChange, getSettings, getResolution } from './preview-settings.js';
 import { getBgPixels, onBgChange } from './bg.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -342,14 +344,21 @@ function clearChildren(el) { while (el.firstChild) el.removeChild(el.firstChild)
 
 export function renderCrosshair(svg, params, opts = {}) {
   clearChildren(svg);
-  const zoom = (Number.isFinite(opts.zoom) && opts.zoom > 0) ? opts.zoom : getSettings().zoom;
-  const vbW = SCREEN_W / zoom, vbH = SCREEN_H / zoom;
-  svg.setAttribute('viewBox', `${SCREEN_W / 2 - vbW / 2} ${SCREEN_H / 2 - vbH / 2} ${vbW} ${vbH}`);
+  const settings = getSettings();
+  const res = getResolution();
+  const W = res.w, H = res.h;
+  const zoom = (Number.isFinite(opts.zoom) && opts.zoom > 0) ? opts.zoom : settings.zoom;
+  const vbW = W / zoom, vbH = H / zoom;
+  svg.setAttribute('viewBox', `${W / 2 - vbW / 2} ${H / 2 - vbH / 2} ${vbW} ${vbH}`);
   svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+  // Grosse Vorschau-Container folgen dem Seitenverhaeltnis der simulierten Aufloesung.
+  const host = svg.parentElement;
+  if (host && host.classList.contains('preview')) host.style.aspectRatio = `${W} / ${H}`;
   if (!params) return;
 
-  const shapes = buildShapes(params, SCREEN_H, SCREEN_W, { spreadPx: opts.spreadPx });
-  const r = rasterize(shapes, SCREEN_W, SCREEN_H, getBgPixels(svg.parentElement));
+  const spreadPx = Number.isFinite(opts.spreadPx) ? opts.spreadPx : settings.spreadPx;
+  const shapes = buildShapes(params, H, W, { spreadPx });
+  const r = rasterize(shapes, W, H, getBgPixels(host, W, H));
   if (!r) return;
   const img = document.createElementNS(SVG_NS, 'image');
   img.setAttribute('x', r.x);

@@ -4,15 +4,16 @@
 // CS2 Crosshair Debug CLI
 // =======================
 //
-// Generates a CS2 cfg with the current presets bound to F1-F8, then watches
-// the CS2 screenshots folder and produces a compare HTML page (SVG preview
-// vs in-game screenshot).
+// Generates CS2 cfgs with the current presets bound to F1-F8 (CS2 crosshair
+// system since the 2026-09-22 update: 18 pixel-based cvars, see
+// public/js/cvars.js), then watches the CS2 screenshots folder and produces a
+// compare HTML page (app preview vs in-game screenshot, side by side).
 //
 // Subcommands:
 //   prepare     write cursed_debug.cfg + per-preset cfgs into CS2's cfg dir
 //   launch      launch CS2 via Steam URL (opens Steam, you must press Play)
-//   watch       poll the CS2 screenshots dir, copy new JPGs into data/debug/
-//   compare     generate data/debug/compare.html and print the file:// URL
+//   watch       poll the CS2 screenshots dir, copy new shots into data/debug/
+//   compare     generate data/debug/compare.html and serve it locally
 //   all         prepare + launch + watch (Ctrl+C to stop) + compare
 //   detect      print detected paths and exit
 //   clean       remove generated cfgs and copied screenshots
@@ -20,6 +21,33 @@
 // VAC-safe: only writes cfg files and starts CS2 via Steam URL — no input
 // injection, no memory access, no DLL injection. Screenshots are taken by
 // CS2's built-in `screenshot` console command (bound to F11 by default).
+//
+// Compare page: the page uses the REAL renderer of the running app
+// (public/js/preview.js, loaded as an ES module — shader port + in-game
+// geometry, rendered in game pixels). Because /static on the app sends no CORS
+// headers, `compare` starts a small local HTTP server that serves data/debug/
+// and proxies /static/* to --app-url, so the module import is same-origin.
+// There are no scale/aspect/stretch controls any more: the renderer works in
+// game pixels, so take screenshots with the console command `screenshot`
+// (real render buffer) or as PNG at native resolution and compare 1:1.
+//
+// Pixel-exact comparison (numeric, not by eye) lives in three separate tools:
+//   1. node tools/calib-codes.mjs          -> data/calibration-v2/codes.{md,json}
+//      Generates the calibration share codes (fixed test cases, magenta,
+//      1920x1080; two extra cases for 1280x960 scaling).
+//   2. Import each code in CS2 (Settings -> Crosshair -> Share Code), stand
+//      still with the knife in front of the sky / a plain wall and take a PNG
+//      screenshot at native 1920x1080; save it as data/calibration-v2/shots/NN.png
+//      (NN = case number from codes.md, e.g. 01.png).
+//   3. node tools/calib-expected.mjs data/calibration-v2 [W H]
+//      Renders the expected pixels (buildShapes + shadePixel, premultiplied,
+//      linear light) around the screen centre -> expected/NN.f32 + meta.json.
+//   4. python3 tools/calib-compare.py data/calibration-v2 [outdir]
+//      Composites expected over the background estimated from the crop edge
+//      (game blend model: SRC_ALPHA/ONE_MINUS_SRC_ALPHA in linear light on an
+//      sRGB framebuffer), counts missing/extra/wrong pixels, writes diff images
+//      (red = missing, yellow = extra, cyan = wrong colour) + report.json.
+//   data/ is git-ignored; needs Python 3 with numpy + Pillow for step 4.
 //
 // Usage:
 //   node tools/cs2-debug.js <subcommand> [options]
@@ -31,6 +59,9 @@
 //   --steam PATH         Override Steam install path
 //   --cfg-dir PATH       Override CS2 cfg dir
 //   --shots-dir PATH     Override CS2 screenshots dir
+//   --port N             Port of the local compare server (default 3777)
+//
+// Requires Node >= 22.12 (lib/cvars.js loads the shared browser module via require(esm)).
 
 const fs = require('fs');
 const path = require('path');
@@ -38,7 +69,14 @@ const os = require('os');
 const http = require('http');
 const { execFileSync, spawn } = require('child_process');
 
+// Gemeinsames Cvar-Modell und Zahlenformat der App wiederverwenden — nichts duplizieren.
+const { CVAR_KEYS } = require('../lib/cvars.js');
+const { _internal: cfgExport } = require('../lib/cfg-export.js');
+const { fmtNum } = cfgExport;
+
 const PROJECT_ROOT = path.resolve(__dirname, '..');
+const DEFAULT_APP_URL = 'http://localhost:3000';
+const DEFAULT_COMPARE_PORT = 3777;
 const APP_DEBUG_DIR = path.join(PROJECT_ROOT, 'data', 'debug');
 const APP_SCREENSHOTS_DIR = path.join(APP_DEBUG_DIR, 'screenshots');
 const STATE_FILE = path.join(APP_DEBUG_DIR, 'state.json');
@@ -164,34 +202,15 @@ async function fetchAppState({ appUrl, adminUser, adminPass }) {
 // -------------------------------------------------------------------------
 // Cfg generation
 // -------------------------------------------------------------------------
-function fmtNum(n) {
-  if (n === null || n === undefined) return '0';
-  if (Number.isInteger(n)) return String(n);
-  return Number(n).toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
-}
-
-// Build a per-preset cfg body that sets all crosshair cvars in one go.
+// Build a per-preset cfg body that sets all 18 crosshair cvars, one per line,
+// in CVAR_KEYS order. cl_crosshair_screen_height is the LAST key there on
+// purpose: the game overwrites it whenever length/thickness/gap change, so it
+// must be set after them (same rule as lib/cfg-export.js).
 function presetCfgBody(p, label) {
-  const lines = [
-    `// auto-generated by cs2-debug.js — ${label}`,
-    `cl_crosshairstyle ${fmtNum(p.cl_crosshairstyle)}`,
-    `cl_crosshairsize ${fmtNum(p.cl_crosshairsize)}`,
-    `cl_crosshairthickness ${fmtNum(p.cl_crosshairthickness)}`,
-    `cl_crosshairgap ${fmtNum(p.cl_crosshairgap)}`,
-    `cl_crosshairdot ${fmtNum(p.cl_crosshairdot)}`,
-    `cl_crosshair_t ${fmtNum(p.cl_crosshair_t)}`,
-    `cl_crosshair_recoil ${fmtNum(p.cl_crosshair_recoil)}`,
-    `cl_crosshair_drawoutline ${fmtNum(p.cl_crosshair_drawoutline)}`,
-    `cl_crosshair_outlinethickness ${fmtNum(p.cl_crosshair_outlinethickness)}`,
-    `cl_crosshairusealpha ${fmtNum(p.cl_crosshairusealpha)}`,
-    `cl_crosshairalpha ${fmtNum(p.cl_crosshairalpha)}`,
-    'cl_crosshaircolor 5',
-    `cl_crosshaircolor_r ${fmtNum(p.cl_crosshaircolor_r)}`,
-    `cl_crosshaircolor_g ${fmtNum(p.cl_crosshaircolor_g)}`,
-    `cl_crosshaircolor_b ${fmtNum(p.cl_crosshaircolor_b)}`,
-  ];
-  if (p.cl_crosshair_dynamic_splitdist !== null && p.cl_crosshair_dynamic_splitdist !== undefined) {
-    lines.push(`cl_crosshair_dynamic_splitdist ${fmtNum(p.cl_crosshair_dynamic_splitdist)}`);
+  const lines = [`// auto-generated by cs2-debug.js — ${label}`];
+  for (const key of CVAR_KEYS) {
+    if (p[key] === null || p[key] === undefined) continue; // normalizeParams fills all keys; be lenient
+    lines.push(`${key} ${fmtNum(p[key])}`);
   }
   lines.push(`echo "[DEBUG] crosshair: ${label.replace(/"/g, '')}"`);
   return lines.join('\n') + '\n';
@@ -286,15 +305,24 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 // -------------------------------------------------------------------------
 // CS2 launch
 // -------------------------------------------------------------------------
+// Open a URL with the OS default handler (Steam URL, browser). A missing
+// opener (e.g. no xdg-open on a headless box) must not crash the process.
+function openUrl(url) {
+  let child;
+  if (process.platform === 'win32') {
+    child = spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore' });
+  } else if (process.platform === 'darwin') {
+    child = spawn('open', [url], { detached: true, stdio: 'ignore' });
+  } else {
+    child = spawn('xdg-open', [url], { detached: true, stdio: 'ignore' });
+  }
+  child.on('error', (err) => console.warn(`[debug] could not open ${url}: ${err.message} — open it manually.`));
+  child.unref();
+}
+
 function launchCs2() {
   const url = 'steam://rungameid/730';
-  if (process.platform === 'win32') {
-    spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore' }).unref();
-  } else if (process.platform === 'darwin') {
-    spawn('open', [url], { detached: true, stdio: 'ignore' }).unref();
-  } else {
-    spawn('xdg-open', [url], { detached: true, stdio: 'ignore' }).unref();
-  }
+  openUrl(url);
   console.log(`[debug] launched ${url}`);
 }
 
@@ -309,7 +337,7 @@ function htmlEscape(s) {
 
 function generateCompareHtml({ presets, bindings, screenshots }) {
   ensureDir(APP_DEBUG_DIR);
-  // Map each binding to (up to 3 most-recent) screenshots, in order
+  // Map each binding to its screenshots, in arrival order (kept as before).
   const slotShots = bindings.map((b) => ({ ...b, shots: [] }));
   // Naive matching: assign screenshots sequentially in slot order.
   // Better matching is hard without console-output parsing; user can rename.
@@ -332,10 +360,8 @@ function generateCompareHtml({ presets, bindings, screenshots }) {
   <header><h2>#${b.slot} <span class="key">${htmlEscape(b.key)}</span> — ${htmlEscape(preset.name)}</h2></header>
   <div class="cmp">
     <div class="col">
-      <h3>SVG preview</h3>
-      <div class="canvas">
-        <svg id="svg-${b.slot}" viewBox="0 0 500 500"></svg>
-      </div>
+      <h3>App preview (real renderer)</h3>
+      <div class="canvas preview" id="preview-${b.slot}"></div>
       <pre class="params">${htmlEscape(JSON.stringify(params, null, 2))}</pre>
     </div>
     <div class="col">
@@ -351,6 +377,8 @@ function generateCompareHtml({ presets, bindings, screenshots }) {
     return { slot: b.slot, params: preset.params };
   }));
 
+  // /static/js/preview.js wird vom lokalen Compare-Server (cmdCompare) zur App
+  // durchgereicht — same-origin, sonst blockt CORS den Modul-Import.
   const html = `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8" />
@@ -360,94 +388,64 @@ function generateCompareHtml({ presets, bindings, screenshots }) {
   h1 { font-size:24px; margin:0 0 16px; }
   h2 { font-size:18px; margin:0; }
   h3 { font-size:14px; margin:0 0 8px; color:#9aa3b8; }
+  p.hint { color:#9aa3b8; margin:0 0 12px; max-width:900px; }
   .key { background:#ff3b8a; color:#fff; padding:2px 8px; border-radius:4px; font-size:13px; }
   .row { background:#161a23; border:1px solid #2a3142; border-radius:8px; padding:16px; margin-bottom:16px; }
   .row > header { margin-bottom:12px; }
   .toolbar { display:flex; gap:12px; align-items:center; margin-bottom:16px; flex-wrap:wrap; }
-  .toolbar select, .toolbar input { background:#0d0f14; color:#e8ecf3; border:1px solid #2a3142; border-radius:4px; padding:6px 8px; font-size:13px; }
+  .toolbar select { background:#0d0f14; color:#e8ecf3; border:1px solid #2a3142; border-radius:4px; padding:6px 8px; font-size:13px; }
   .toolbar label { color:#9aa3b8; font-size:12px; }
   .cmp { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
   @media (max-width: 1100px) { .cmp { grid-template-columns:1fr; } }
   .canvas { background:#6a6e7a; border:1px solid #2a3142; border-radius:6px; min-height:240px;
             display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:8px; padding:8px; }
-  .canvas svg { width:100%; max-width:500px; aspect-ratio:1; }
+  .canvas.preview { padding:0; overflow:hidden; }
+  .canvas.preview svg { display:block; width:100%; aspect-ratio:4 / 3; }
   .canvas.shots img { max-width:100%; max-height:480px; border-radius:4px; }
   .no-shot { color:#9aa3b8; font-style:italic; }
   .params { font-family:monospace; font-size:11px; color:#9aa3b8; background:#0d0f14;
             padding:8px; border-radius:4px; max-height:160px; overflow:auto; margin-top:8px; }
+  .error { background:#3a1520; border:1px solid #ff3b8a; color:#ffd6e5; padding:12px; border-radius:6px; margin-bottom:16px; }
 </style>
 </head><body>
 <h1>Cursed Crosshair — Debug Compare</h1>
-<p style="color:#9aa3b8;">SVG preview (left) vs in-game screenshot (right). Adjust scale/aspect/mode below to match your CS2 setup.</p>
+<p class="hint">Left: the app's real renderer (<code>public/js/preview.js</code>, shader port + in-game geometry) in game pixels
+at the preview's simulated resolution (default 1280×960; 1 SVG unit = 1 game pixel). Right: in-game screenshots, matched to slots in arrival order.</p>
+<p class="hint">Take screenshots with the console command <code>screenshot</code> (real render buffer) or as PNG at native
+resolution (Win+PrtScn / Xbox Game Bar) — never a scaled/compressed capture. For a numeric pixel comparison use
+<code>tools/calib-codes.mjs</code> → <code>calib-expected.mjs</code> → <code>calib-compare.py</code> (see tools/README.md).</p>
 
 <div class="toolbar">
-  <label>Aspect <select id="opt-aspect">
-    <option value="16:9" selected>16:9</option>
-    <option value="16:10">16:10</option>
-    <option value="4:3">4:3</option>
-  </select></label>
-  <label>Resolution <select id="opt-res"></select></label>
-  <label>Mode <select id="opt-mode">
-    <option value="native" selected>Native</option>
-    <option value="stretched">Stretched</option>
-    <option value="blackbars">Black bars</option>
-  </select></label>
   <label>Zoom <select id="opt-zoom">
-    <option value="1">1×</option><option value="2">2×</option>
-    <option value="4" selected>4×</option><option value="6">6×</option>
-    <option value="8">8×</option><option value="12">12×</option>
+    <option value="1" selected>Original (whole render surface)</option><option value="2">2×</option>
+    <option value="4">4×</option><option value="6">6×</option><option value="8">8×</option>
   </select></label>
 </div>
+<div id="load-error" class="error" hidden></div>
 
 ${items}
-<script>
-${SVG_RENDER_FN}
+<script type="module">
+import { renderCrosshair, ensureSvg } from '/static/js/preview.js';
 const data = ${presetsJson};
-
-const RES_BY_ASPECT = {
-  '16:9':  ['1280x720','1366x768','1600x900','1920x1080','2560x1440','3840x2160'],
-  '16:10': ['1280x800','1440x900','1680x1050','1920x1200','2560x1600'],
-  '4:3':   ['1024x768','1280x960','1440x1080','1600x1200','1920x1440'],
-};
-const DEFAULT_RES = { '16:9': '1920x1080', '16:10': '1680x1050', '4:3': '1440x1080' };
-
 const ctlZoom = document.getElementById('opt-zoom');
-const ctlAspect = document.getElementById('opt-aspect');
-const ctlMode = document.getElementById('opt-mode');
-const ctlRes = document.getElementById('opt-res');
-
-function fillRes() {
-  const list = RES_BY_ASPECT[ctlAspect.value] || RES_BY_ASPECT['16:9'];
-  ctlRes.innerHTML = '';
-  for (const r of list) {
-    const o = document.createElement('option');
-    o.value = r; o.textContent = r;
-    ctlRes.appendChild(o);
-  }
-  ctlRes.value = DEFAULT_RES[ctlAspect.value] || list[0];
-}
-
-// hStretch assumes a 16:9 display in stretched mode (typical modern monitor).
-function getHStretch() {
-  if (ctlMode.value !== 'stretched') return 1;
-  const [a, b] = ctlAspect.value.split(':').map(Number);
-  if (!a || !b) return 1;
-  return (16/9) / (a/b);
-}
 
 function renderAll() {
-  const scale = Number(ctlZoom.value);
-  const hStretch = getHStretch();
+  const zoom = Number(ctlZoom.value) || 1;
   for (const item of data) {
-    const svg = document.getElementById('svg-' + item.slot);
-    if (svg) renderCrosshair(svg, item.params, scale, hStretch);
+    const host = document.getElementById('preview-' + item.slot);
+    if (host) renderCrosshair(ensureSvg(host), item.params, { zoom });
   }
 }
-
-ctlAspect.addEventListener('change', () => { fillRes(); renderAll(); });
-[ctlZoom, ctlMode, ctlRes].forEach((el) => el.addEventListener('change', renderAll));
-fillRes();
+ctlZoom.addEventListener('change', renderAll);
 renderAll();
+</script>
+<script>
+window.addEventListener('error', (e) => {
+  const box = document.getElementById('load-error');
+  box.hidden = false;
+  box.textContent = 'Renderer could not be loaded: ' + (e.message || e) +
+    ' — is the app running at the --app-url passed to "compare"?';
+}, true);
 </script>
 </body></html>`;
 
@@ -456,73 +454,59 @@ renderAll();
   return outPath;
 }
 
-// Inline copy of the renderer (so the compare HTML is self-contained).
-const SVG_RENDER_FN = `
-const SVG_NS = 'http://www.w3.org/2000/svg';
-const VIEW = 500, CENTER = 250;
-function svgEl(name, attrs) {
-  const el = document.createElementNS(SVG_NS, name);
-  if (attrs) for (const k of Object.keys(attrs)) el.setAttribute(k, attrs[k]);
-  return el;
-}
-function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); }
-function clamp255(v){v=Number(v);return Number.isFinite(v)?Math.max(0,Math.min(255,Math.round(v))):0;}
-function renderCrosshair(svg, p, scale, hStretch) {
-  scale = scale || 4; hStretch = hStretch || 1;
-  clear(svg);
-  svg.setAttribute('viewBox', '0 0 500 500');
-  if (!p) return;
-  const sizeRaw = Number(p.cl_crosshairsize);
-  const dot = (p.cl_crosshairdot ?? 0) === 1;
-  if (Number.isFinite(sizeRaw) && sizeRaw <= 0 && !dot) return;
-  const r = clamp255(p.cl_crosshaircolor_r ?? 0);
-  const g = clamp255(p.cl_crosshaircolor_g ?? 255);
-  const b = clamp255(p.cl_crosshaircolor_b ?? 0);
-  const useAlpha = (p.cl_crosshairusealpha ?? 0) === 1;
-  const alpha = clamp255(p.cl_crosshairalpha ?? 255);
-  const opacity = useAlpha ? alpha / 255 : 1;
-  const fill = 'rgb(' + r + ',' + g + ',' + b + ')';
-  const drawOutline = (p.cl_crosshair_drawoutline ?? 0) === 1;
-  const outlineWidth = drawOutline ? Math.max(0, p.cl_crosshair_outlinethickness ?? 0) * scale : 0;
-  const outlineX = outlineWidth * hStretch;
-  const size = Math.max(0, p.cl_crosshairsize ?? 0);
-  const thickness = Math.max(0, p.cl_crosshairthickness ?? 0);
-  const gap = Number.isFinite(p.cl_crosshairgap) ? p.cl_crosshairgap : 0;
-  const showT = (p.cl_crosshair_t ?? 0) === 1;
-  const dirs = showT ? ['bottom','left','right'] : ['top','bottom','left','right'];
-  function lineRect(d) {
-    if (size <= 0 || thickness <= 0) return null;
-    const len = size * scale, w = thickness * scale, off = gap * scale;
-    if (d === 'top') { const sw = w * hStretch; return { x: CENTER - sw/2, y: CENTER - off - len, width: sw, height: len }; }
-    if (d === 'bottom') { const sw = w * hStretch; return { x: CENTER - sw/2, y: CENTER + off, width: sw, height: len }; }
-    if (d === 'left')  { const sl = len * hStretch, so = off * hStretch; return { x: CENTER - so - sl, y: CENTER - w/2, width: sl, height: w }; }
-    const sl = len * hStretch, so = off * hStretch;
-    return { x: CENTER + so, y: CENTER - w/2, width: sl, height: w };
-  }
-  if (outlineWidth > 0) {
-    for (const d of dirs) { const r2 = lineRect(d); if (!r2) continue;
-      svg.appendChild(svgEl('rect', { x: r2.x - outlineX, y: r2.y - outlineWidth,
-        width: r2.width + outlineX*2, height: r2.height + outlineWidth*2, fill: '#000', opacity })); }
-    if (dot && thickness > 0) { const dw = thickness * scale, dwx = dw * hStretch;
-      svg.appendChild(svgEl('rect', { x: CENTER - dwx/2 - outlineX, y: CENTER - dw/2 - outlineWidth,
-        width: dwx + outlineX*2, height: dw + outlineWidth*2, fill: '#000', opacity })); }
-  }
-  for (const d of dirs) { const r2 = lineRect(d); if (!r2) continue;
-    svg.appendChild(svgEl('rect', { x: r2.x, y: r2.y, width: r2.width, height: r2.height, fill, opacity })); }
-  if (dot && thickness > 0) { const dw = thickness * scale, dwx = dw * hStretch;
-    svg.appendChild(svgEl('rect', { x: CENTER - dwx/2, y: CENTER - dw/2, width: dwx, height: dw, fill, opacity })); }
-}
-`;
+// -------------------------------------------------------------------------
+// Local compare server: serves data/debug/ and proxies /static/* to the app
+// (module import of the real renderer must be same-origin — no CORS on /static).
+// -------------------------------------------------------------------------
+const MIME = {
+  '.html': 'text/html; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg', '.tga': 'application/octet-stream', '.bmp': 'image/bmp',
+  '.json': 'application/json', '.js': 'text/javascript',
+};
 
-function openInBrowser(filePath) {
-  const fileUrl = 'file:///' + filePath.replace(/\\/g, '/');
-  if (process.platform === 'win32') {
-    spawn('cmd', ['/c', 'start', '', fileUrl], { detached: true, stdio: 'ignore' }).unref();
-  } else if (process.platform === 'darwin') {
-    spawn('open', [fileUrl], { detached: true, stdio: 'ignore' }).unref();
-  } else {
-    spawn('xdg-open', [fileUrl], { detached: true, stdio: 'ignore' }).unref();
-  }
+function startCompareServer({ appUrl, port }) {
+  const app = new URL(appUrl);
+  const server = http.createServer((req, res) => {
+    const reqUrl = new URL(req.url, 'http://localhost');
+    if (reqUrl.pathname.startsWith('/static/')) {
+      // Proxy to the running app (renderer module + its imports + map images).
+      const proxyReq = http.request({
+        hostname: app.hostname,
+        port: app.port || 80,
+        path: reqUrl.pathname + reqUrl.search,
+        method: 'GET',
+        headers: { host: app.host },
+      }, (up) => {
+        res.writeHead(up.statusCode || 502, up.headers);
+        up.pipe(res);
+      });
+      proxyReq.on('error', (err) => {
+        res.writeHead(502, { 'Content-Type': 'text/plain' });
+        res.end(`upstream ${appUrl} unreachable: ${err.message}`);
+      });
+      proxyReq.end();
+      return;
+    }
+    // Static files from data/debug/ (no path traversal).
+    const rel = decodeURIComponent(reqUrl.pathname === '/' ? '/compare.html' : reqUrl.pathname);
+    const file = path.normalize(path.join(APP_DEBUG_DIR, rel));
+    if (!file.startsWith(APP_DEBUG_DIR + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('not found');
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream' });
+    fs.createReadStream(file).pipe(res);
+  });
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', () => resolve(server));
+  });
+}
+
+function openInBrowser(target) {
+  // Accepts an http(s) URL or a local file path.
+  openUrl(/^https?:\/\//.test(target) ? target : 'file:///' + target.replace(/\\/g, '/'));
 }
 
 // -------------------------------------------------------------------------
@@ -545,7 +529,7 @@ async function cmdPrepare(args) {
   if (!fs.existsSync(cs2.cs2Dir)) throw new Error(`CS2 not found at ${cs2.cs2Dir}`);
   ensureDir(cs2.cfgDir);
 
-  const appUrl = args['app-url'] || 'http://localhost:3000';
+  const appUrl = args['app-url'] || DEFAULT_APP_URL;
   const adminUser = args['admin-user'] || process.env.ADMIN_USER || 'admin';
   const adminPass = args['admin-pass'] || process.env.ADMIN_PASSWORD || 'testpass';
 
@@ -611,7 +595,7 @@ async function cmdWatch() {
   }
 }
 
-async function cmdCompare() {
+async function cmdCompare(args) {
   if (!fs.existsSync(STATE_FILE)) throw new Error('Run "prepare" first.');
   const st = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
   // Pick up any screenshots already in APP_SCREENSHOTS_DIR (in case watcher wasn't run)
@@ -626,8 +610,18 @@ async function cmdCompare() {
     screenshots: onDisk,
   });
   console.log(`[debug] wrote ${path.relative(PROJECT_ROOT, out)}`);
-  console.log(`[debug] file:///${out.replace(/\\/g, '/')}`);
-  openInBrowser(out);
+
+  const appUrl = args['app-url'] || DEFAULT_APP_URL;
+  const port = Number(args.port) || DEFAULT_COMPARE_PORT;
+  const server = await startCompareServer({ appUrl, port });
+  const url = `http://127.0.0.1:${port}/compare.html`;
+  console.log(`[debug] serving ${url}  (renderer proxied from ${appUrl}/static/) — Ctrl+C to stop`);
+  openInBrowser(url);
+  await new Promise((resolve) => {
+    const stop = () => { server.close(); resolve(); };
+    process.once('SIGINT', stop);
+    process.once('SIGTERM', stop);
+  });
 }
 
 async function cmdAll(args) {
@@ -637,7 +631,7 @@ async function cmdAll(args) {
   console.log('[debug] Press Ctrl+C when you are done taking screenshots — compare HTML will then be generated.');
   console.log('');
   await cmdWatch();
-  await cmdCompare();
+  await cmdCompare(args);
 }
 
 async function cmdClean() {
@@ -669,7 +663,7 @@ async function main() {
       case 'prepare': return await cmdPrepare(args);
       case 'launch':  return await cmdLaunch();
       case 'watch':   return await cmdWatch();
-      case 'compare': return await cmdCompare();
+      case 'compare': return await cmdCompare(args);
       case 'all':     return await cmdAll(args);
       case 'clean':   return await cmdClean();
       case 'help':

@@ -92,7 +92,7 @@ Two JSON files in `/data/`, each written atomically.
       "submittedBy": "PatriQ"
     }
   ],
-  "restore": { "params": { /* see green default in Section 9 */ } },
+  "restore": { "params": { /* see green default in Section 8 */ } },
   "keys": { "next": "o", "restore": "p" }
 }
 ```
@@ -143,13 +143,13 @@ All 18 keys are always present after validation; missing keys get the cvar defau
 
 **Automatic migration:** on the first `readState()` / `readSubmissions()` after the update, every entry whose params still use the old cvar set (`isLegacyParams`) is converted with `migrateLegacyParams(params, { screenHeight: 960 })` (`public/js/migrate.js`; 960 = the resolution the old presets were designed on). Before the file is rewritten it is copied to `<file>.pre-cs2-update-<YYYYMMDD>.bak` (only if that backup does not exist yet). Migrated entries get `"migrated": true` as a marker for the admin UI; the flag is dropped when the entry is saved again from the admin UI without it. The migration is idempotent. Independently of that, all params are passed through `normalizeParams` on every read.
 
-**First-run seed:** create `presets.json` with one starter preset and the green restore (Section 9). Create empty `submissions.json` with `{ "submissions": [] }`.
+**First-run seed:** create `presets.json` with one starter preset and the green restore (Section 8, `lib/defaults.js`). Create empty `submissions.json` with `{ "submissions": [] }`.
 
 ---
 
 ## 7. Public Page (`/`)
 
-Same crosshair editor as admin (sliders, color picker, live SVG preview), but **no preset list, no restore editor, no key bindings, no export button**.
+Same crosshair editor as admin (style dropdown, sliders, color picker, live preview rendered by the game-accurate renderer), but **no preset list, no restore editor, no key bindings, no export button**.
 
 **Layout:** centered card-like layout. Title + tagline ("Submit your cursed crosshair"). Editor on the left or top, live preview on the right or bottom — responsive.
 
@@ -189,30 +189,24 @@ Three-column layout on desktop, stacks on mobile.
 - Top: "+ Add Preset" button + counter "X presets".
 
 **Center column — live preview:**
-- Big SVG canvas (~500×500), dark background, renders the currently selected preset.
+- Big preview canvas (SVG, ~500 px wide, 4:3), map-screenshot background, renders the currently selected preset.
 - Re-render on every parameter change.
-- Approximation of CS2 rendering rules:
-  - `cl_crosshairsize` = line length in px
-  - `cl_crosshairthickness` = line width in px
-  - `cl_crosshairgap` = distance from center (negative = overlap)
-  - `cl_crosshairdot 1` = center square sized by thickness
-  - `cl_crosshair_t 1` = top line removed
-  - `cl_crosshair_drawoutline 1` + `cl_crosshair_outlinethickness` = black stroke around lines
-  - `cl_crosshairalpha` (when `cl_crosshairusealpha 1`) = opacity 0–255
-  - Color = RGB
-  - Doesn't need pixel-perfect match, just clearly recognizable.
+- **Renderer (`public/js/preview.js`)** — not an approximation any more: a port of the game's crosshair pixel shader (`csgo_crosshair.slang`, reconstructed from SPIR-V) plus the geometry code of the client (`csgo_crosshair.cpp`: cvars → up to 16 shapes — rects, ring, quad arc segments — with fill and outline colour). Rendered per canvas in real game pixels (simulated resolution, default 1280×960; values scaled with `current_height / cl_crosshair_screen_height` like the game) and embedded as `<image>` into the SVG, whose viewBox is 1 unit = 1 game pixel. Blending happens in linear light on the map background (`SRC_ALPHA / ONE_MINUS_SRC_ALPHA`, sRGB framebuffer), as the game does. Verified pixel by pixel against in-game screenshots (`tools/calib-*.mjs` / `calib-compare.py`, see `tools/README.md`).
+- Preview controls (shared by public + admin, persisted in localStorage): **Background** (map), **Resolution** (simulated game resolution, default 1280×960 — the values scale like in the game), **Zoom** (viewBox crop only, `Original` = whole render surface), **Spread** slider + **Dynamic Preview** animation for the dynamic styles. No display-aspect / stretch settings.
 
-**Right column — editor:** all fields with both slider AND number input where a range makes sense; live-syncs to preview.
+**Right column — editor:** all fields with both slider AND number input where a range makes sense; ranges always come from `CVARS` in `public/js/cvars.js` (the game clamps hard to them — "cursed" now means extreme values inside these limits); live-syncs to preview.
 - Name (text)
-- `cl_crosshairstyle` (0–5, segmented buttons)
-- `cl_crosshairsize` (decimal, allow extreme values like 0.01 and 999)
-- `cl_crosshairthickness` (decimal)
-- `cl_crosshairgap` (allow -999 to 9999)
-- `cl_crosshairdot`, `cl_crosshair_t`, `cl_crosshair_recoil` (toggles)
-- `cl_crosshair_drawoutline` (toggle), `cl_crosshair_outlinethickness` (number)
-- `cl_crosshairusealpha` (toggle), `cl_crosshairalpha` (0–255 slider)
-- RGB color picker + 3 number inputs (0–255)
-- Collapsible "Advanced" section: `cl_crosshair_dynamic_splitdist` (only emitted to `.cfg` when enabled)
+- **Style** (`cl_crosshairstyle`, dropdown with the 9 styles in the CS2 settings order: Static Cross 4, Static Circle 3, Static Square 8, Dot Only 6, Dynamic Cross 0, Dynamic Circle 1, Dynamic Cross (Classic) 2, Dynamic Cross (Legacy/Shot Feedback) 5, Dynamic Quad 7) with an info popover describing each style
+- **Length** `cl_crosshair_length` (integer pixels, 0–255)
+- **Thickness** `cl_crosshair_thickness` (integer pixels, 0–31)
+- **Gap** `cl_crosshair_gap` (integer pixels, 0–128 — no negative gaps any more)
+- **Center Dot** `cl_crosshairdot`, **T-Style** `cl_crosshair_t`, **Follow Recoil** `cl_crosshair_recoil` (toggles)
+- **Outline** `cl_crosshair_drawoutline` (segmented: None 0 / Full 1 / Half 2)
+- **Color** RGB picker + 3 number inputs `cl_crosshaircolor_r/g/b` (0–255) and **Alpha** `cl_crosshaircolor_a` (0–255 slider; always applied, there is no use-alpha switch any more)
+- Collapsible **Dynamic** group: `cl_crosshair_dynamic_spread_limit` (0–255)
+- Collapsible **Classic split (Style 2)** group: `cl_crosshair_dynamic_splitdist` (0–127), `cl_crosshair_dynamic_splitalpha_innermod` (0–1, step 0.05), `cl_crosshair_dynamic_splitalpha_outermod` (0.3–1, step 0.05), `cl_crosshair_dynamic_maxdist_splitratio` (0–1, step 0.01)
+- Collapsible **Advanced** group: `cl_crosshair_screen_height` (240–65535, number input) with the note that the game resets it to the current resolution as soon as length/thickness/gap are changed in-game
+- **Style-dependent greying:** fields that have no effect for the selected style (`isRelevant(key, style)` — same visibility table as the game's settings menu, e.g. Length/Gap/T-Style for Dot Only, Classic split only for style 2, Spread limit only for styles 0/1/7) are shown disabled; their values stay in the params and are still exported.
 
 **Top bar buttons:**
 - "Edit Restore Crosshair" (modal with same editor for the green default; pre-filled with my green crosshair on first run — see below)
@@ -220,13 +214,18 @@ Three-column layout on desktop, stacks on mobile.
 - "Export .cfg" (triggers download of generated cfg)
 - Auto-save indicator (debounced PUT to `/api/admin/state` on change, ~500ms).
 
-**Restore (green default) seed values for first run:**
-- `cl_crosshairstyle 4`, `cl_crosshairsize 0.8`, `cl_crosshairthickness 0.9`, `cl_crosshairgap -4.3`
+**Restore (green default) seed values for first run** (`GREEN_RESTORE_PARAMS` in `lib/defaults.js`; a fixed literal, once derived from the pre-update values style 4 / size 0.8 / thickness 0.9 / gap -4 / RGB 0/255/91 at the streamer's 1280×960 via `migrateLegacyParams`):
+- `cl_crosshairstyle 4`, `cl_crosshair_length 2`, `cl_crosshair_thickness 2`, `cl_crosshair_gap 1`
 - `cl_crosshairdot 0`, `cl_crosshair_t 0`, `cl_crosshair_recoil 0`
-- `cl_crosshairgap_useweaponvalue 0`, `cl_fixedcrosshairgap 3`
-- `cl_crosshair_drawoutline 1`, `cl_crosshair_outlinethickness 0`
-- `cl_crosshaircolor 5`, RGB `0 / 255 / 91`, `cl_crosshairusealpha 0`, `cl_crosshairalpha 255`
-- `cl_crosshair_dynamic_maxdist_splitratio 1`, `cl_crosshair_dynamic_splitalpha_innermod 0`, `cl_crosshair_dynamic_splitalpha_outermod 1`, `cl_crosshair_dynamic_splitdist 3`
+- `cl_crosshair_drawoutline 0`
+- RGB `0 / 255 / 91`, `cl_crosshaircolor_a 255`
+- `cl_crosshair_dynamic_spread_limit 255`
+- `cl_crosshair_dynamic_splitdist 3`, `cl_crosshair_dynamic_splitalpha_innermod 0`, `cl_crosshair_dynamic_splitalpha_outermod 1`, `cl_crosshair_dynamic_maxdist_splitratio 1`
+- `cl_crosshair_screen_height 960`
+
+The starter preset for a fresh `presets.json` is `STARTER_PRESET_PARAMS` in the same file (Dynamic Quad, length 40, thickness 6, gap 2, dot, recoil, full outline, RGB 255/0/200 alpha 220, screen height 1080).
+
+---
 
 ### Tab 2: Submissions
 
@@ -245,7 +244,7 @@ Tab label shows pending count badge: "Submissions (3)".
 - **Reject** — marks submission `rejected` (kept for the audit log; can be cleared with the cleanup button).
 - **Delete** — removes the submission entirely (with confirm).
 
-When a preset has `submittedBy`, append it to the echo line in the exported `.cfg` (Section 10).
+When a preset has `submittedBy`, append it to the echo line in the exported `.cfg` (Section 11).
 
 ---
 
@@ -460,7 +459,7 @@ After this workflow runs successfully, I can pull `ghcr.io/<owner>/cursed-crossh
 4. **Captcha:** Submitting without a Turnstile token returns 400. Disabling Turnstile env vars logs a warning and skips verification (for dev).
 5. **Admin login:** `/admin` redirects to `/admin/login`. Wrong creds fail. Correct creds (from env or generated) land me on the dashboard.
 6. **Admin Submissions tab:** Lists my submission. I can View/Edit it (full editor), tweak it, and Approve. It now appears in the Presets tab with a "by <name>" badge.
-7. **Live editing:** Adjusting any slider live-updates the SVG preview in both public and admin editors.
+7. **Live editing:** Adjusting any field live-updates the preview in both public and admin editors; fields irrelevant for the selected style are greyed out.
 8. **Persistence:** Add / duplicate / reorder / delete persist across container restarts (data volume).
 9. **Export:** "Export .cfg" downloads a working `cursed_crosshair.cfg` that, when placed in CS2's cfg folder and `exec`'d, loads the green crosshair on load and lets `o`/`p` cycle through presets / restore. Approved submissions appear with `(by <name>)` in echo lines.
 10. **Logout** clears the session; `/admin` redirects back to login.

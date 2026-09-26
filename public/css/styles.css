@@ -308,6 +308,9 @@ details.field--inactive > summary { cursor: pointer; }
 .preview-controls span {
   display: inline-flex; align-items: center; gap: 6px;
 }
+.preview-spread input[type=range] { width: 110px; margin: 0; }
+.preview-controls .btn.active { border-color: var(--accent, #e040fb); color: var(--accent, #e040fb); }
+.preview-spread output { font-size: 12px; min-width: 44px; color: var(--muted, #9aa3b8); }
 .bg-select {
   background: var(--bg); color: var(--text);
   border: 1px solid var(--border); border-radius: var(--radius-sm);

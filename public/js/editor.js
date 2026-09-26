@@ -17,6 +17,7 @@ function lim(key) {
 }
 
 const STYLE_INFO_HTML = `
+<p><em>Preview:</em> use the Spread slider above the preview to simulate weapon inaccuracy for the dynamic styles. The Classic split bars and the Legacy recoil kick only exist in-game and are not simulated.</p>
 <p><strong>Static Cross:</strong> classic four-line crosshair, never moves. The most common choice for experienced players.</p>
 <p><strong>Static Circle:</strong> a fixed ring instead of lines.</p>
 <p><strong>Static Square:</strong> a fixed square outline instead of lines (added 2026-09-24).</p>

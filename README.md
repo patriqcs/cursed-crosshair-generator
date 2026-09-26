@@ -8,11 +8,11 @@ Deployed via Docker on Unraid (or any Docker host) and exposed publicly through 
 
 ## Features
 
-- **Public submit page** — vanilla HTML editor with live SVG preview. No login. Cloudflare Turnstile protects the submission endpoint.
+- **Public submit page** — vanilla HTML editor with a game-accurate live preview (port of the CS2 crosshair shader + geometry, rendered in game pixels on map backgrounds). No login. Cloudflare Turnstile protects the submission endpoint.
 - **Admin dashboard** — tabbed interface (Presets / Submissions), full editor, restore-crosshair editor, key-binding editor, one-click `.cfg` export.
 - **Approval workflow** — review, edit, and approve user submissions. Approved presets get a `(by <name>)` echo line in the exported cfg.
 - **Atomic JSON storage** — `presets.json` and `submissions.json` in a mounted Docker volume (`/data`).
-- **CS2 crosshair system since 2026-09-22** — pixel-based cvars (`cl_crosshair_length/thickness/gap`, `cl_crosshair_screen_height`, ...). Data written with the old cvar set is migrated automatically on first read (backup kept next to the file, see below).
+- **CS2 crosshair system since 2026-09-22** — 18 pixel-based cvars (`cl_crosshair_length/thickness/gap`, `cl_crosshair_screen_height`, ...), all 9 styles, Full/Half outline; share code import/export. Data written with the old cvar set is migrated automatically on first read (backup kept next to the file, see below).
 - **Single-admin auth** — env-var based (`ADMIN_USER`, `ADMIN_PASSWORD`). Auto-generates a random password on first run if none is set.
 - **Real-IP rate limiting** — `CF-Connecting-IP` header is honored. 5 logins / 15 min, 10 submissions / hour per IP.
 - **Cloudflare Tunnel ready** — `trust proxy` enabled, secure cookies, plain HTTP on port 3000.
@@ -174,6 +174,12 @@ Re-`exec`'ing the cfg in CS2 is safe: every key bind is preceded by `unbind`, so
 ## Migration of pre-2026-09-22 data
 
 On the first read after the update, any preset, restore or submission still stored with the old cvar set (`cl_crosshairsize`, `cl_crosshairgap`, `cl_crosshairusealpha`, ...) is converted with `migrateLegacyParams()` (`public/js/migrate.js`) at a reference height of 960 px (the resolution the old presets were designed on). Before writing, the original file is copied to `presets.json.pre-cs2-update-<YYYYMMDD>.bak` (resp. `submissions.json.pre-cs2-update-<YYYYMMDD>.bak`) in the data directory; an existing backup is never overwritten. Migrated entries carry `"migrated": true` until they are saved again from the admin UI. The migration is idempotent.
+
+---
+
+## Calibration against CS2
+
+The preview renderer (`public/js/preview.js`) is checked against the real game, not tuned by eye. `tools/` contains the workflow for that: `cs2-debug.js` writes per-preset cfgs, collects in-game screenshots and serves a side-by-side compare page using the app's own renderer; `calib-codes.mjs` → `calib-expected.mjs` → `calib-compare.py` do a numeric pixel comparison of fixed calibration cases (share codes imported in CS2, PNG screenshots at native 1920×1080). See [tools/README.md](tools/README.md). Results live under `data/` and are not committed.
 
 ---
 
