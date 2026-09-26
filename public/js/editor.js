@@ -27,7 +27,7 @@ const STYLE_INFO_HTML = `
 <p><strong>Dynamic Cross (Classic):</strong> the old style 2 — lines split into an inner and outer part while moving (split distance / alpha / ratio settings below).</p>
 <p><strong>Dynamic Cross (Legacy/Shot Feedback):</strong> only expands while firing, indicating spread.</p>
 <p><strong>Dynamic Quad:</strong> a static cross plus four diagonal arcs that show your current inaccuracy.</p>
-<p>All values are pixels at the reference height (<code>cl_crosshair_screen_height</code>); the game scales them proportionally to your actual screen height.</p>
+<p>All values are pixels at 1920×1080; the game scales them proportionally to your actual screen height.</p>
 `;
 
 // Editor-Felder in Anzeige-Reihenfolge. Ranges IMMER via lim() aus CVARS.
@@ -70,20 +70,6 @@ const FIELDS = [
       { type: 'slider', key: 'cl_crosshair_dynamic_splitalpha_innermod', label: 'Inner alpha (cl_crosshair_dynamic_splitalpha_innermod)', ...lim('cl_crosshair_dynamic_splitalpha_innermod') },
       { type: 'slider', key: 'cl_crosshair_dynamic_splitalpha_outermod', label: 'Outer alpha (cl_crosshair_dynamic_splitalpha_outermod)', ...lim('cl_crosshair_dynamic_splitalpha_outermod') },
       { type: 'slider', key: 'cl_crosshair_dynamic_maxdist_splitratio',  label: 'Split ratio (cl_crosshair_dynamic_maxdist_splitratio)', ...lim('cl_crosshair_dynamic_maxdist_splitratio') },
-    ],
-  },
-  {
-    type: 'group',
-    key: 'group-advanced',
-    label: 'Advanced',
-    children: [
-      {
-        type: 'number',
-        key: 'cl_crosshair_screen_height',
-        label: 'Reference screen height (px) (cl_crosshair_screen_height)',
-        note: 'The game sets this automatically to your current resolution as soon as length, thickness or gap are changed in-game.',
-        ...lim('cl_crosshair_screen_height'),
-      },
     ],
   },
 ];
@@ -398,7 +384,7 @@ function buildRgb(_field, params, onChange) {
   return wrap;
 }
 
-// Aufklappbereich (Dynamic / Classic split / Advanced).
+// Aufklappbereich (Dynamic / Classic split).
 function buildGroup(field, params, onChange, registry) {
   const det = el('details', { class: 'advanced' });
   det.appendChild(el('summary', null, field.label));

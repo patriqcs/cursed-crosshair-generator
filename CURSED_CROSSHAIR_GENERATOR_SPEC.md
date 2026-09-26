@@ -205,7 +205,7 @@ Three-column layout on desktop, stacks on mobile.
 - **Color** RGB picker + 3 number inputs `cl_crosshaircolor_r/g/b` (0–255) and **Alpha** `cl_crosshaircolor_a` (0–255 slider; always applied, there is no use-alpha switch any more)
 - Collapsible **Dynamic** group: `cl_crosshair_dynamic_spread_limit` (0–255)
 - Collapsible **Classic split (Style 2)** group: `cl_crosshair_dynamic_splitdist` (0–127), `cl_crosshair_dynamic_splitalpha_innermod` (0–1, step 0.05), `cl_crosshair_dynamic_splitalpha_outermod` (0.3–1, step 0.05), `cl_crosshair_dynamic_maxdist_splitratio` (0–1, step 0.01)
-- Collapsible **Advanced** group: `cl_crosshair_screen_height` (240–65535, number input) with the note that the game resets it to the current resolution as soon as length/thickness/gap are changed in-game
+- `cl_crosshair_screen_height` is not exposed in the editor (removed 2026-09-26 on request); presets keep the value from their import code or the default 1080, the export always writes it last.
 - **Style-dependent greying:** fields that have no effect for the selected style (`isRelevant(key, style)` — same visibility table as the game's settings menu, e.g. Length/Gap/T-Style for Dot Only, Classic split only for style 2, Spread limit only for styles 0/1/7) are shown disabled; their values stay in the params and are still exported.
 
 **Top bar buttons:**

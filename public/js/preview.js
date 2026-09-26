@@ -163,6 +163,7 @@ export function dynamicDistance(spreadPx, { spreadLimit, outlineMode, dot, thick
 
 // buildShapes(params, screenH, screenW, opts)
 //   opts.spreadPx: simulierter Waffen-Spread in Pixeln (nur Vorschau, Default 0 = Messer/Ruhe)
+//   opts.kick:     Legacy-Rueckstosswert (Style 5), 0..25, steigt je Schuss um 15, faellt 42/s
 export function buildShapes(params, screenH = SCREEN_H, screenW = SCREEN_W, opts = {}) {
   const p = params || {};
   const style = clamp(Math.round(num(p.cl_crosshairstyle, 4)), 0, 8);
@@ -193,21 +194,23 @@ export function buildShapes(params, screenH = SCREEN_H, screenW = SCREEN_W, opts
   const rect = (x0, y0, x1, y1) => shapes.push({ type: 0, a: [x0, y0, x1 - 1, y1 - 1], m1: 0, ol, fill, outline });
   const ring = (type, c, outer, w, m1) => shapes.push({ type, a: [cx - c - 0.5, cy - c - 0.5, outer, w], m1, ol, fill, outline });
 
-  const cross = (dist) => {
-    if (length <= 0 || t <= 0) return;
+  const crossWith = (dist, len, f, o) => {
+    if (len <= 0 || t <= 0) return;
     const { hi, lo, odd } = thick(t);
     const adj = odd ? -1 : 0;
     const L = Math.floor(cx - dist);
     const R = Math.ceil(cx + dist) + adj;
     const T = Math.ceil(cy + dist) + adj;
-    rect(L - length, cy - hi, L, cy + lo);
-    rect(R, cy - hi, R + length, cy + lo);
-    rect(cx - hi, T, cx + lo, T + length);
+    const r2 = (x0, y0, x1, y1) => shapes.push({ type: 0, a: [x0, y0, x1 - 1, y1 - 1], m1: 0, ol, fill: f, outline: o });
+    r2(L - len, cy - hi, L, cy + lo);
+    r2(R, cy - hi, R + len, cy + lo);
+    r2(cx - hi, T, cx + lo, T + len);
     if (!tStyle) {
-      const y0 = Math.floor(cy - dist - length);
-      rect(cx - hi, y0, cx + lo, y0 + length);
+      const y0 = Math.floor(cy - dist - len);
+      r2(cx - hi, y0, cx + lo, y0 + len);
     }
   };
+  const cross = (dist) => crossWith(dist, length, fill, outline);
   const circle = (r) => {
     if (r < 0 || t <= 0) return;
     const { odd } = thick(t);
@@ -226,7 +229,37 @@ export function buildShapes(params, screenH = SCREEN_H, screenW = SCREEN_W, opts
   switch (style) {
     case 0: cross(e0); break;
     case 1: circle(e0); break;
-    case 2: case 5: cross(gap); break;   // Ruhezustand; Split/Recoil-Feedback nur im Spiel
+    case 2: {
+      // Classic (VMA 1bf2f10): Spread in 480er-Einheiten (spread01), Pixel = roundf(H/480 * spread01).
+      // Split, sobald spread01 > splitdist: innere Balken bei splitPx + gap mit alpha*innermod,
+      // aeussere bei spreadPx + gap + innerLen mit alpha*outermod.
+      const splitdist = clamp(num(p.cl_crosshair_dynamic_splitdist, 3), 0, 127);
+      const inner = clamp(num(p.cl_crosshair_dynamic_splitalpha_innermod, 0), 0, 1);
+      const outer = clamp(num(p.cl_crosshair_dynamic_splitalpha_outermod, 1), 0.3, 1);
+      const ratio = clamp(num(p.cl_crosshair_dynamic_maxdist_splitratio, 1), 0, 1);
+      const spread01 = spreadPx * 480 / screenH;
+      const sPx = roundHalfAway(screenH / 480 * spread01);
+      const splitPx = roundHalfAway(screenH / 480 * Math.min(splitdist, spread01));
+      if (sPx <= 0) { cross(gap); break; }              // stehend; Laufen/Ducken nur im Spiel (+2/-2/+4)
+      if (spread01 > splitdist) {
+        const innerLen = Math.ceil((1 - ratio) * length);
+        const outerLen = Math.floor(ratio * length);
+        const a255 = Math.round(alpha * 255);
+        const withAlpha = (mod) => { const a = Math.trunc(a255 * mod) / 255; return { fill: [fill[0], fill[1], fill[2], a], outline: [0, 0, 0, outlineOn ? a : 0] }; };
+        const o = withAlpha(outer), i = withAlpha(inner);
+        crossWith(sPx + gap + innerLen, outerLen, o.fill, o.outline);
+        crossWith(splitPx + gap, innerLen, i.fill, i.outline);
+      } else {
+        cross(sPx + gap);
+      }
+      break;
+    }
+    case 5: {
+      // Legacy (VMA 1bf3240): dist = roundf(gap + H/1200 * kick), kick += 15 je Schuss, max 25, -42/s.
+      const kick = Math.max(0, Math.min(25, num(opts.kick, 0)));
+      cross(roundHalfAway(gap + screenH / 1200 * kick));
+      break;
+    }
     case 3: circle(Math.max(1, gap)); break;
     case 4: cross(gap); break;
     case 7: {
@@ -357,7 +390,8 @@ export function renderCrosshair(svg, params, opts = {}) {
   if (!params) return;
 
   const spreadPx = Number.isFinite(opts.spreadPx) ? opts.spreadPx : settings.spreadPx;
-  const shapes = buildShapes(params, H, W, { spreadPx });
+  const kick = Number.isFinite(opts.kick) ? opts.kick : (settings.kick || 0);
+  const shapes = buildShapes(params, H, W, { spreadPx, kick });
   const r = rasterize(shapes, W, H, getBgPixels(host, W, H));
   if (!r) return;
   const img = document.createElementNS(SVG_NS, 'image');

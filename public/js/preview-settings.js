@@ -30,6 +30,7 @@ function read(key, validate) {
 function write(key, v) { try { localStorage.setItem(KEYS[key], String(v)); } catch (_e) { /* ignore */ } }
 
 const state = {
+  kick: 0, // Legacy-Rueckstoss (Style 5), nur waehrend der Dynamic Preview > 0
   zoom: read('zoom', (r) => (ZOOM_OPTIONS.includes(Number(r)) ? Number(r) : null)),
   resolution: read('resolution', (r) => (RESOLUTIONS.some((x) => x.key === r) ? r : null)),
   spreadPx: read('spreadPx', (r) => { const n = Number(r); return Number.isFinite(n) ? Math.max(0, Math.min(SPREAD_MAX, Math.round(n))) : null; }),
@@ -78,19 +79,36 @@ function spreadAt(time) {
   }
   return 0;
 }
+// Schusszeitpunkte innerhalb des Zyklus (Stage 6: 6 Schuesse im Abstand von 0.3 s).
+const SHOT_STAGE_START = STAGES.slice(0, 5).reduce((a, s) => a + s.t, 0);
+const SHOT_TIMES = [0, 1, 2, 3, 4, 5].map((i) => SHOT_STAGE_START + i * 0.3);
+let lastCycleTime = 0;
+let kickVal = 0;
 function animFrame(now) {
   animRaf = requestAnimationFrame(animFrame);
   if (now - animLast < 33) return; // ~30 fps reichen, der Renderer rechnet pro Bild
+  const dt = animLast ? (now - animLast) / 1000 : 0;
   animLast = now;
-  const v = spreadAt((now - animStart) / 1000);
-  if (v !== state.spreadPx) { state.spreadPx = v; notify(); }
+  const time = (now - animStart) / 1000;
+  const v = spreadAt(time);
+  // Legacy-Kick wie im Spiel: +15 je Schuss, Deckel 25, Abklingen 42/s
+  const ct = time % CYCLE;
+  const prev = lastCycleTime;
+  lastCycleTime = ct;
+  for (const st of SHOT_TIMES) {
+    if ((prev < st && ct >= st) || (prev > ct && (st >= prev || st < ct))) kickVal += 15;
+  }
+  kickVal = Math.max(0, Math.min(25, kickVal) - 42 * dt);
+  const k = Math.round(kickVal * 100) / 100;
+  if (v !== state.spreadPx || k !== state.kick) { state.spreadPx = v; state.kick = k; notify(); }
 }
 export function setDynamicPreview(on) {
   if (on && !animRaf) {
-    animStart = performance.now(); animLast = 0;
+    animStart = performance.now(); animLast = 0; lastCycleTime = 0; kickVal = 0;
     animRaf = requestAnimationFrame(animFrame);
   } else if (!on && animRaf) {
     cancelAnimationFrame(animRaf); animRaf = 0;
+    state.kick = 0;
     state.spreadPx = read('spreadPx', (r) => { const n = Number(r); return Number.isFinite(n) ? Math.max(0, Math.min(SPREAD_MAX, Math.round(n))) : null; });
     notify();
   } else return;
