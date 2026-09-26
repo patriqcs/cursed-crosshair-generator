@@ -39,6 +39,8 @@ You can read it with `docker logs cursed-crosshair-generator` or `cat data/admin
 
 ---
 
+> **Local admin login:** the session cookie is `Secure` and only works over HTTPS. For plain-HTTP development start the server with `COOKIE_INSECURE=true` (see `.env.example`).
+
 ## Required environment variables
 
 | Variable | Required? | Notes |
