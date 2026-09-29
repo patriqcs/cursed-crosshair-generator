@@ -162,7 +162,7 @@ export function dynamicDistance(spreadPx, { spreadLimit, outlineMode, dot, thick
 }
 
 // buildShapes(params, screenH, screenW, opts)
-//   opts.spreadPx: simulierter Waffen-Spread in Pixeln (nur Vorschau, Default 0 = Messer/Ruhe)
+//   opts.spreadPx: simulierter Waffen-Spread in Pixeln (nur Vorschau; 0 = Messer, Gewehr im Stand ~7 px bei 1080p)
 //   opts.kick:     Legacy-Rueckstosswert (Style 5), 0..25, steigt je Schuss um 15, faellt 42/s
 export function buildShapes(params, screenH = SCREEN_H, screenW = SCREEN_W, opts = {}) {
   const p = params || {};

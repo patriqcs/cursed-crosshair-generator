@@ -106,7 +106,7 @@ The preview is no longer an approximation: `public/js/preview.js` is a port of t
 | **Background** | Map screenshot the crosshair is composited onto (affects blending exactly like a real background would). |
 | **Resolution** | Simulated *game* resolution (default 1280×960). The cvars are pixel values relative to `cl_crosshair_screen_height`; the game scales them with `current_height / screen_height` (same rounding), so the same preset looks different at 960p and 1080p. |
 | **Zoom** | Visual zoom only (viewBox crop around the centre); doesn't affect anything saved or exported. `Original` = whole render surface, 1 SVG unit = 1 game pixel. |
-| **Spread** / **Dynamic Preview** | Simulated weapon spread in pixels for the dynamic styles (0 = knife / standing still), or an animation of walk/stop/shoot like the Dynamic Preview in the CS2 settings. |
+| **Spread** / **Dynamic Preview** | Simulated weapon spread in pixels for the dynamic styles (default 7 = standing still with a rifle, AK-47 at 1080p; 0 = knife), or an animation of walk/stop/shoot like the Dynamic Preview in the CS2 settings. |
 
 There are no display-aspect / stretch settings any more (the old `4:3 stretched` emulation is gone): what you see is the game's render surface at the chosen resolution.
 

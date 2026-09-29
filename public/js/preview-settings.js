@@ -5,7 +5,9 @@
 //               aktuelleHoehe / cl_crosshair_screen_height (Rundung wie im Spiel),
 //               deshalb sieht dasselbe Preset bei 960p und 1080p unterschiedlich aus.
 //   spreadPx    Simulierter Waffen-Spread in Pixeln fuer die dynamischen Styles
-//               (Dynamic Cross/Circle/Quad). 0 = Messer / Ruhe.
+//               (Dynamic Cross/Circle/Quad). 0 = Messer; ein Gewehr hat auch im
+//               Stand einen Grundspread (AK-47 bei 1080p: 7 px, Screenshot-Messung
+//               2026-09-29, Quad-Ring Aussenradius 37 = 7 + 30), deshalb Default 7.
 
 const ZOOM_OPTIONS = [1, 2, 3, 4, 6, 8];
 export const RESOLUTIONS = [
@@ -16,7 +18,9 @@ export const RESOLUTIONS = [
   { key: '2560x1440', w: 2560, h: 1440, label: '2560×1440' },
 ];
 const SPREAD_MAX = 320;
-const DEFAULTS = { zoom: 1, resolution: '1920x1080', spreadPx: 0 };
+// Grundspread im Stand mit Gewehr (AK-47, 1080p, gemessen). Default des Reglers und Ruhewert der Animation.
+export const SPREAD_REST = 7;
+const DEFAULTS = { zoom: 1, resolution: '1920x1080', spreadPx: SPREAD_REST };
 const KEYS = { zoom: 'ccg.preview.zoom', resolution: 'ccg.preview.resolution', spreadPx: 'ccg.preview.spread' };
 
 function read(key, validate) {
@@ -50,18 +54,19 @@ export function getSettings() { return { ...state }; }
 
 // ---------------------------------------------------------------------------
 // Dynamic Preview: animiert spreadPx wie das "Dynamic Preview" im Spiel-Menue.
-// Ablauf (Annaeherung, das Skript des Spiels ist nicht bekannt): Stillstand ->
+// Ablauf (Annaeherung, das Skript des Spiels ist nicht bekannt): Stillstand (Grundspread) ->
 // Laufen (Spread waechst auf ~100 px und pendelt) -> Stehenbleiben -> 6 Schuesse
-// (jeder Schuss +110 px, klingt in ~0.35 s ab) -> zurueck zu 0. Schleife.
+// (jeder Schuss +110 px, klingt in ~0.35 s ab) -> zurueck zum Grundspread. Schleife.
 // ---------------------------------------------------------------------------
+const R = SPREAD_REST;
 const STAGES = [
-  { t: 1.2, f: () => 0 },
-  { t: 0.6, f: (u) => 100 * u },
+  { t: 1.2, f: () => R },
+  { t: 0.6, f: (u) => R + (100 - R) * u },
   { t: 1.8, f: (u) => 100 + 12 * Math.sin(u * Math.PI * 6) },
-  { t: 0.6, f: (u) => 100 * (1 - u) },
-  { t: 0.5, f: () => 0 },
-  { t: 1.8, f: (u) => { const k = u * 6; const frac = k - Math.floor(k); return 110 * Math.exp(-frac * 6) * (1 + 0.3 * Math.min(Math.floor(k), 3)); } },
-  { t: 0.5, f: (u) => 130 * Math.exp(-u * 6) },
+  { t: 0.6, f: (u) => R + (100 - R) * (1 - u) },
+  { t: 0.5, f: () => R },
+  { t: 1.8, f: (u) => { const k = u * 6; const frac = k - Math.floor(k); return R + 110 * Math.exp(-frac * 6) * (1 + 0.3 * Math.min(Math.floor(k), 3)); } },
+  { t: 0.5, f: (u) => R + 130 * Math.exp(-u * 6) },
 ];
 const CYCLE = STAGES.reduce((a, s) => a + s.t, 0);
 let animRaf = 0;
@@ -77,7 +82,7 @@ function spreadAt(time) {
     if (t < st.t) return Math.max(0, Math.round(st.f(t / st.t)));
     t -= st.t;
   }
-  return 0;
+  return R;
 }
 // Schusszeitpunkte innerhalb des Zyklus (Stage 6: 6 Schuesse im Abstand von 0.3 s).
 const SHOT_STAGE_START = STAGES.slice(0, 5).reduce((a, s) => a + s.t, 0);
@@ -162,7 +167,7 @@ export function buildPreviewControls(extraSlot = null) {
 
   const spreadWrap = document.createElement('span');
   spreadWrap.className = 'preview-spread';
-  spreadWrap.title = 'Simulated weapon spread in pixels for the dynamic styles (Dynamic Cross, Dynamic Circle, Dynamic Quad). 0 = knife / standing still.';
+  spreadWrap.title = `Simulated weapon spread in pixels for the dynamic styles (Dynamic Cross, Dynamic Circle, Dynamic Quad). ${SPREAD_REST} px = standing still with a rifle (AK-47, 1080p), 0 = knife.`;
   const spread = document.createElement('input');
   spread.type = 'range'; spread.min = '0'; spread.max = String(SPREAD_MAX); spread.step = '1';
   spread.value = String(state.spreadPx);
