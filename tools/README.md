@@ -104,7 +104,7 @@ The preview is no longer an approximation: `public/js/preview.js` is a port of t
 | Control | What it does |
 |---|---|
 | **Background** | Map screenshot the crosshair is composited onto (affects blending exactly like a real background would). |
-| **Resolution** | Simulated *game* resolution (default 1280×960). The cvars are pixel values relative to `cl_crosshair_screen_height`; the game scales them with `current_height / screen_height` (same rounding), so the same preset looks different at 960p and 1080p. |
+| **Resolution** | Simulated *game* resolution (default 1920×1080). The cvars are pixel values relative to `cl_crosshair_screen_height`; the game scales them with `current_height / screen_height` (same rounding), so the same preset looks different at 960p and 1080p. |
 | **Zoom** | Visual zoom only (viewBox crop around the centre); doesn't affect anything saved or exported. `Original` = whole render surface, 1 SVG unit = 1 game pixel. |
 | **Spread** / **Dynamic Preview** | Simulated weapon spread in pixels for the dynamic styles (default 7 = standing still with a rifle, AK-47 at 1080p; 0 = knife), or an animation of walk/stop/shoot like the Dynamic Preview in the CS2 settings. |
 
@@ -116,7 +116,7 @@ There are no display-aspect / stretch settings any more (the old `4:3 stretched`
 
 `data/debug/compare.html` shows for every keybind slot:
 
-- left: the preset rendered by the app's real renderer (`renderCrosshair` from `public/js/preview.js`, loaded as an ES module) at the preview's simulated resolution (default 1280×960), with a zoom selector
+- left: the preset rendered by the app's real renderer (`renderCrosshair` from `public/js/preview.js`, loaded as an ES module) at the preview's simulated resolution (default 1920×1080), with a zoom selector
 - right: any in-game screenshots that arrived during the watch window
 
 `compare` serves the page from a small local HTTP server (`http://127.0.0.1:3777/`) that proxies `/static/*` to the running app, because the app's `/static` route sends no CORS headers and a `file://` page could not import the module otherwise. The app must be running while the page is open.
