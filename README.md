@@ -110,6 +110,9 @@ The app's own admin login still applies on top.
 
 1. Visit https://dash.cloudflare.com/?to=/:account/turnstile and create a site.
 2. Add the public hostname you configured in the tunnel section (and `localhost` for testing).
+   **Every** hostname the site is served under must be listed — a hostname missing from the widget's
+   domain list makes the widget fail with "Verbinden zur Website nicht möglich" / error 110200 in the
+   browser console. The list can be edited later via `PUT /accounts/{account_id}/challenges/widgets/{sitekey}`.
 3. Copy the **Site Key** and **Secret Key**.
 4. Set them as `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` in your env.
 
