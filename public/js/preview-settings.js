@@ -21,7 +21,10 @@ const SPREAD_MAX = 320;
 // Grundspread im Stand mit Gewehr (AK-47, 1080p, gemessen). Default des Reglers und Ruhewert der Animation.
 export const SPREAD_REST = 7;
 const DEFAULTS = { zoom: 1, resolution: '1920x1080', spreadPx: SPREAD_REST };
-const KEYS = { zoom: 'ccg.preview.zoom', resolution: 'ccg.preview.resolution', spreadPx: 'ccg.preview.spread' };
+// spread-Schluessel seit 2026-09-29 mit Suffix .v2: unter dem alten Schluessel liegt bei vielen Browsern
+// noch die 0 aus der Zeit, als 0 der Default war; die wuerde den neuen Default 7 dauerhaft ueberdecken.
+const KEYS = { zoom: 'ccg.preview.zoom', resolution: 'ccg.preview.resolution', spreadPx: 'ccg.preview.spread.v2' };
+try { localStorage.removeItem('ccg.preview.spread'); } catch (_e) { /* ignore */ }
 
 function read(key, validate) {
   try {
