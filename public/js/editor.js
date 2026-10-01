@@ -16,17 +16,23 @@ function lim(key) {
   return { min: spec.min, max: spec.max, step: spec.step ?? 1 };
 }
 
+// Der Gap-Cvar reicht von -3840 bis 3840. Der Schieberegler deckt nur den praktisch
+// nutzbaren Teil ab (sonst waere 1 px Reglerweg ~25 Einheiten); das Zahlenfeld daneben
+// nimmt den vollen Cvar-Bereich.
+const GAP_SLIDER = { sliderMin: -128, sliderMax: 512 };
+
 const STYLE_INFO_HTML = `
-<p><em>Preview:</em> use the Spread slider above the preview to simulate weapon inaccuracy for the dynamic styles. The Classic split bars and the Legacy recoil kick only exist in-game and are not simulated.</p>
+<p><em>Preview:</em> use the Spread slider above the preview to simulate weapon inaccuracy for the dynamic styles (including the Classic split bars). The Legacy recoil kick is shown while the Dynamic Preview runs.</p>
 <p><strong>Static Cross:</strong> classic four-line crosshair, never moves. The most common choice for experienced players.</p>
 <p><strong>Static Circle:</strong> a fixed ring instead of lines.</p>
 <p><strong>Static Square:</strong> a fixed square outline instead of lines (added 2026-09-24).</p>
 <p><strong>Dot Only:</strong> just the center dot — length, gap and T-style have no effect.</p>
+<p><strong>Static Quadrant:</strong> four fixed arcs on the diagonals (added 2026-09-30). Gap sets the radius, "Quadrant size" the arc width — 1 closes them into a full ring.</p>
 <p><strong>Dynamic Cross:</strong> four lines that spread with movement, crouching and shooting, up to the spread limit.</p>
 <p><strong>Dynamic Circle:</strong> a ring that grows with your inaccuracy.</p>
-<p><strong>Dynamic Cross (Classic):</strong> the old style 2 — lines split into an inner and outer part while moving (split distance / alpha / ratio settings below).</p>
+<p><strong>Dynamic Cross (Classic):</strong> the old style 2 — lines split into an inner and outer part while moving (split distance / alpha / ratio settings below). The only style where a negative gap has an effect: it pulls the bars in while they spread.</p>
 <p><strong>Dynamic Cross (Legacy/Shot Feedback):</strong> only expands while firing, indicating spread.</p>
-<p><strong>Dynamic Quad:</strong> a static cross plus four diagonal arcs that show your current inaccuracy.</p>
+<p><strong>Dynamic Quadrant:</strong> a static cross plus four diagonal arcs that show your current inaccuracy.</p>
 <p>All values are pixels at 1920×1080; the game scales them proportionally to your actual screen height.</p>
 `;
 
@@ -41,7 +47,7 @@ const FIELDS = [
   },
   { type: 'slider', key: 'cl_crosshair_length',    label: 'Length (cl_crosshair_length)',       ...lim('cl_crosshair_length') },
   { type: 'slider', key: 'cl_crosshair_thickness', label: 'Thickness (cl_crosshair_thickness)', ...lim('cl_crosshair_thickness') },
-  { type: 'slider', key: 'cl_crosshair_gap',       label: 'Gap (cl_crosshair_gap)',             ...lim('cl_crosshair_gap') },
+  { type: 'slider', key: 'cl_crosshair_gap',       label: 'Gap (cl_crosshair_gap)',             ...lim('cl_crosshair_gap'), ...GAP_SLIDER },
   { type: 'toggle', key: 'cl_crosshairdot',     label: 'Center Dot (cl_crosshairdot)' },
   { type: 'toggle', key: 'cl_crosshair_t',      label: 'T-Style (cl_crosshair_t)' },
   { type: 'toggle', key: 'cl_crosshair_recoil', label: 'Follow Recoil (cl_crosshair_recoil)' },
@@ -51,7 +57,9 @@ const FIELDS = [
     label: 'Outline (cl_crosshair_drawoutline)',
     options: OUTLINE_MODES,
   },
-  { type: 'rgb', key: 'rgb', label: 'Color (RGB)' },
+  { type: 'rgb', key: 'rgb-outline', prefix: 'cl_crosshairoutline_', label: 'Outline color (RGB 0-255)' },
+  { type: 'slider', key: 'cl_crosshairoutline_a', label: 'Outline alpha (cl_crosshairoutline_a)', ...lim('cl_crosshairoutline_a') },
+  { type: 'rgb', key: 'rgb', prefix: 'cl_crosshaircolor_', label: 'Color (RGB 0-255)' },
   { type: 'slider', key: 'cl_crosshaircolor_a', label: 'Alpha (cl_crosshaircolor_a)', ...lim('cl_crosshaircolor_a') },
   {
     type: 'group',
@@ -69,7 +77,19 @@ const FIELDS = [
       { type: 'slider', key: 'cl_crosshair_dynamic_splitdist',           label: 'Split distance (cl_crosshair_dynamic_splitdist)',       ...lim('cl_crosshair_dynamic_splitdist') },
       { type: 'slider', key: 'cl_crosshair_dynamic_splitalpha_innermod', label: 'Inner alpha (cl_crosshair_dynamic_splitalpha_innermod)', ...lim('cl_crosshair_dynamic_splitalpha_innermod') },
       { type: 'slider', key: 'cl_crosshair_dynamic_splitalpha_outermod', label: 'Outer alpha (cl_crosshair_dynamic_splitalpha_outermod)', ...lim('cl_crosshair_dynamic_splitalpha_outermod') },
-      { type: 'slider', key: 'cl_crosshair_dynamic_maxdist_splitratio',  label: 'Split ratio (cl_crosshair_dynamic_maxdist_splitratio)', ...lim('cl_crosshair_dynamic_maxdist_splitratio') },
+    ],
+  },
+  // Ein Cvar, zwei Rollen im Spiel: "Split Size Ratio" (Style 2) und "Quadrant Size" (Style 9).
+  { type: 'slider', key: 'cl_crosshair_dynamic_maxdist_splitratio', label: 'Split ratio / Quadrant size (cl_crosshair_dynamic_maxdist_splitratio)', ...lim('cl_crosshair_dynamic_maxdist_splitratio') },
+  {
+    // Seit 2026-09-30 Teil der Crosshair-Einstellungen und des Share-Codes. Nur im Zoom
+    // (AUG / SG 553) sichtbar, deshalb ohne Vorschau.
+    type: 'group',
+    key: 'group-scope',
+    label: 'Scope dot (AUG / SG 553, not previewed)',
+    children: [
+      { type: 'toggle', key: 'cl_ironsight_usecrosshaircolor', label: 'Use crosshair color (cl_ironsight_usecrosshaircolor)' },
+      { type: 'slider', key: 'cl_ironsight_dot_scale', label: 'Dot scale (cl_ironsight_dot_scale)', ...lim('cl_ironsight_dot_scale') },
     ],
   },
 ];
@@ -104,9 +124,13 @@ function buildSlider(field, params, onChange) {
   // Always store the clamped value so reading state never returns out-of-range
   params[field.key] = initial;
 
+  // Optional engerer Reglerbereich (sliderMin/sliderMax); Werte ausserhalb bleiben
+  // erhalten, der Regler steht dann am Anschlag.
+  const sMin = field.sliderMin ?? field.min;
+  const sMax = field.sliderMax ?? field.max;
   const slider = el('input', {
-    type: 'range', min: field.min, max: field.max, step: field.step,
-    value: initial,
+    type: 'range', min: sMin, max: sMax, step: field.step,
+    value: clamp(initial, sMin, sMax),
   });
   const num = el('input', {
     type: 'number', min: field.min, max: field.max, step: field.step,
@@ -125,7 +149,7 @@ function buildSlider(field, params, onChange) {
     if (Number.isFinite(v)) {
       const clamped = clamp(v, field.min, field.max);
       params[field.key] = clamped;
-      slider.value = String(clamped);
+      slider.value = String(clamp(clamped, sMin, sMax));
       onChange();
     }
   });
@@ -139,7 +163,7 @@ function buildSlider(field, params, onChange) {
     if (snapped !== v) {
       num.value = String(snapped);
       params[field.key] = snapped;
-      slider.value = String(snapped);
+      slider.value = String(clamp(snapped, sMin, sMax));
       onChange();
     }
   });
@@ -344,25 +368,27 @@ function buildSelect(field, params, onChange) {
   return wrap;
 }
 
-function buildRgb(_field, params, onChange) {
+// RGB-Feld fuer eine Cvar-Dreiergruppe <prefix>r/g/b (Crosshair- oder Outline-Farbe).
+function buildRgb(field, params, onChange) {
+  const prefix = field.prefix;
   const wrap = el('div', { class: 'field' });
-  wrap.appendChild(el('label', null, 'Color (RGB 0-255)'));
+  wrap.appendChild(el('label', null, field.label));
   const row = el('div', { class: 'rgb-row' });
 
-  const picker = el('input', { type: 'color', value: rgbToHex(params) });
+  const picker = el('input', { type: 'color', value: rgbToHex(params, prefix) });
   row.appendChild(picker);
 
   const inputs = {};
   for (const ch of ['r', 'g', 'b']) {
-    const key = `cl_crosshaircolor_${ch}`;
+    const key = `${prefix}${ch}`;
     const inp = el('input', {
       type: 'number', min: 0, max: 255, step: 1,
-      value: params[key] ?? 0,
+      value: params[key] ?? CVARS[key].default,
     });
     inp.addEventListener('input', () => {
       const v = clamp(Math.round(Number(inp.value)), 0, 255);
       params[key] = v;
-      picker.value = rgbToHex(params);
+      picker.value = rgbToHex(params, prefix);
       onChange();
     });
     inputs[ch] = inp;
@@ -371,9 +397,9 @@ function buildRgb(_field, params, onChange) {
 
   picker.addEventListener('input', () => {
     const { r, g, b } = hexToRgb(picker.value);
-    params.cl_crosshaircolor_r = r;
-    params.cl_crosshaircolor_g = g;
-    params.cl_crosshaircolor_b = b;
+    params[`${prefix}r`] = r;
+    params[`${prefix}g`] = g;
+    params[`${prefix}b`] = b;
     inputs.r.value = String(r);
     inputs.g.value = String(g);
     inputs.b.value = String(b);
@@ -407,18 +433,20 @@ function buildField(field, params, onChange, registry) {
     default:          node = el('div');
   }
   // Fuer die Style-abhaengige Ausgrauung merken: Feld -> betroffene Cvar-Keys.
-  const keys = field.type === 'group'
-    ? field.children.map((c) => c.key).filter((k) => k in CVARS)
-    : (field.key in CVARS ? [field.key] : []);
+  let keys;
+  if (field.type === 'group') keys = field.children.map((c) => c.key).filter((k) => k in CVARS);
+  else if (field.type === 'rgb') keys = ['r', 'g', 'b'].map((ch) => `${field.prefix}${ch}`);
+  else keys = field.key in CVARS ? [field.key] : [];
   if (keys.length > 0) registry.push({ node, keys });
   return node;
 }
 
 // Felder ausgrauen, die fuer den gewaehlten Style im Spiel keine Wirkung haben.
 // Werte bleiben erhalten; nur Optik + Bedienbarkeit werden abgeschaltet.
-function applyRelevance(registry, style) {
+function applyRelevance(registry, params) {
+  const style = params.cl_crosshairstyle;
   for (const { node, keys } of registry) {
-    const inactive = keys.every((k) => !isRelevant(k, style));
+    const inactive = keys.every((k) => !isRelevant(k, style, params));
     node.classList.toggle('field--inactive', inactive);
     node.querySelectorAll('input, select, button').forEach((inp) => { inp.disabled = inactive; });
     // Gruppe: alle Felder inaktiv -> Summary bleibt bedienbar (details ist
@@ -432,13 +460,13 @@ export function buildEditor(host, params, onChange) {
   host.innerHTML = '';
   const registry = [];
   const notify = () => {
-    applyRelevance(registry, params.cl_crosshairstyle);
+    applyRelevance(registry, params);
     onChange();
   };
   for (const field of FIELDS) {
     host.appendChild(buildField(field, params, notify, registry));
   }
-  applyRelevance(registry, params.cl_crosshairstyle);
+  applyRelevance(registry, params);
 }
 
 // Client-Defaults = Cvar-Defaults des Spiels. Die Startwerte der Public-Seite
@@ -465,10 +493,10 @@ function clampStep(v, min, max, step) {
   return quantize(clamp(v, min, max), step);
 }
 
-function rgbToHex(p) {
-  const r = clamp(Math.round(Number(p.cl_crosshaircolor_r ?? 0)), 0, 255);
-  const g = clamp(Math.round(Number(p.cl_crosshaircolor_g ?? 0)), 0, 255);
-  const b = clamp(Math.round(Number(p.cl_crosshaircolor_b ?? 0)), 0, 255);
+function rgbToHex(p, prefix = 'cl_crosshaircolor_') {
+  const r = clamp(Math.round(Number(p[`${prefix}r`] ?? 0)), 0, 255);
+  const g = clamp(Math.round(Number(p[`${prefix}g`] ?? 0)), 0, 255);
+  const b = clamp(Math.round(Number(p[`${prefix}b`] ?? 0)), 0, 255);
   return '#' + [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('');
 }
 

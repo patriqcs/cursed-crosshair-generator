@@ -32,7 +32,8 @@ const MODAL_HTML = `
       <div class="field">
         <label>Paste a CS2 share code OR a block of console commands</label>
         <textarea data-role="sc-input" rows="6" autocomplete="off" spellcheck="false"
-          placeholder="CSGO-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX
+          placeholder="CSxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  (new format since 2026-09-30)
+or CSGO-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX  (older code)
 or
 cl_crosshairstyle 4; cl_crosshair_length 8; cl_crosshair_thickness 2; cl_crosshair_gap 4; ..."
           style="width:100%; resize:vertical; font-family:monospace; font-size:12px;
@@ -50,6 +51,7 @@ cl_crosshairstyle 4; cl_crosshair_length 8; cl_crosshair_thickness 2; cl_crossha
       <div class="field">
         <label>Share code</label>
         <input type="text" data-role="sc-output" readonly />
+        <div data-role="sc-hint" class="muted" style="font-size:12px; margin-top:4px;"></div>
       </div>
       <div data-role="sc-clamp-msg" style="font-size:12px; color: var(--warn); min-height:16px; margin-bottom:8px;"></div>
 
@@ -71,9 +73,10 @@ cl_crosshairstyle 4; cl_crosshair_length 8; cl_crosshair_thickness 2; cl_crossha
 </div>
 `;
 
-// Detect input flavor. Returns 'sharecode' if it looks like CSGO-... format.
+// Detect input flavor: neues Format "CS" + 44 Zeichen oder altes CSGO-XXXXX-... Format.
 function looksLikeShareCode(text) {
-  return /^\s*csgo[-]?[\w]{5}[-]?[\w]{5}[-]?[\w]{5}[-]?[\w]{5}[-]?[\w]{5}\s*$/i.test(text);
+  return /^\s*CS[A-Za-z0-9]{44}\s*$/.test(text)
+    || /^\s*csgo[-]?[\w]{5}[-]?[\w]{5}[-]?[\w]{5}[-]?[\w]{5}[-]?[\w]{5}\s*$/i.test(text);
 }
 
 async function copyToClipboard(text) {
@@ -153,9 +156,17 @@ export function openShareCodeModal({ getParams, setParams }) {
       const dec = decode(raw.trim());
       if (!dec) return false;
       kind = 'share code';
-      if (dec.version === 1) {
+      if (dec.legacy) {
         legacy = true;
         imported = migrateLegacyParams(dec.params, { screenHeight: LEGACY_SCREEN_HEIGHT });
+      } else if (dec.format === 'CSGO') {
+        // Alte Codes kennen den Scope-Dot nicht; wie das Spiel bleiben die aktuellen Werte stehen.
+        const cur = getParams() || {};
+        imported = normalizeParams({
+          ...dec.params,
+          cl_ironsight_usecrosshaircolor: cur.cl_ironsight_usecrosshaircolor,
+          cl_ironsight_dot_scale: cur.cl_ironsight_dot_scale,
+        });
       } else {
         imported = normalizeParams(dec.params);
       }
@@ -200,6 +211,7 @@ export function openShareCodeModal({ getParams, setParams }) {
   // ----- Export -----
   const output = root.querySelector('[data-role="sc-output"]');
   const clampMsg = root.querySelector('[data-role="sc-clamp-msg"]');
+  const codeHint = root.querySelector('[data-role="sc-hint"]');
   const cmdOutput = root.querySelector('[data-role="cmd-output"]');
 
   function refreshExport() {
@@ -212,6 +224,7 @@ export function openShareCodeModal({ getParams, setParams }) {
     } else {
       clampMsg.textContent = '';
     }
+    codeHint.textContent = 'New code format since the CS2 update of 2026-09-30 (includes outline color and scope dot).';
     cmdOutput.value = formatCommands(params);
   }
 

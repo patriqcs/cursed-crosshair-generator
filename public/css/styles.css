@@ -140,7 +140,9 @@ input[type="color"] {
   cursor: pointer;
 }
 label { font-size: 12px; color: var(--text-dim); display: block; margin-bottom: 4px;
-  text-transform: uppercase; letter-spacing: 0.05em; }
+  text-transform: uppercase; letter-spacing: 0.05em;
+  /* lange Cvar-Namen in Klammern duerfen in der schmalen Editor-Spalte umbrechen */
+  overflow-wrap: anywhere; }
 
 .field { margin-bottom: 12px; }
 .field-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }

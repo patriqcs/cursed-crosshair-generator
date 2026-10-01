@@ -12,9 +12,11 @@
 //   dist     = 4 + gap                      (Pixel, nicht skaliert, auch negativ)
 //   innerer Balkenrand = dist + floor(barThick / 2) Pixel vom Zentrum
 //
-// Neues System: length/thickness = Pixel; gap = Offset auf den Abstand Zentrum->Balken
-// (Semantik der Gap-Basis: siehe GAP_INNER_EDGE_OFFSET, aus Ghidra/Screenshots zu belegen).
-// Negative Abstaende gibt es nicht mehr -> auf 0 geclampt.
+// Neues System: length/thickness = Pixel; gap = Abstand Zentrum -> innerer Balkenrand.
+// Negative Abstaende zeichnet das Spiel auch nach dem Update vom 2026-09-30 nur im
+// Classic-Style anders als 0 (dort als Offset auf die Spread-Distanz, nicht als Ueberlappung
+// wie frueher) -> weiterhin auf 0 geclampt.
+// Die alte Outline war schwarz mit der Deckkraft des Crosshairs -> Outline-Alpha = Alpha.
 
 import { normalizeParams } from './cvars.js';
 
@@ -85,6 +87,10 @@ export function migrateLegacyParams(old, { screenHeight = 1080 } = {}) {
     cl_crosshaircolor_g: g,
     cl_crosshaircolor_b: b,
     cl_crosshaircolor_a: alpha,
+    cl_crosshairoutline_r: 0,
+    cl_crosshairoutline_g: 0,
+    cl_crosshairoutline_b: 0,
+    cl_crosshairoutline_a: alpha,
     cl_crosshair_dynamic_spread_limit: 255,
     cl_crosshair_dynamic_splitdist: (sd === null || sd === undefined) ? 3 : sd,
     cl_crosshair_dynamic_splitalpha_innermod: num(o.cl_crosshair_dynamic_splitalpha_innermod, 0),

@@ -1,7 +1,8 @@
-// CS2-Crosshair-Renderer (System seit dem "Rush Hour"-Update 2026-09-22).
+// CS2-Crosshair-Renderer (System seit dem "Rush Hour"-Update 2026-09-22, Stand Build 2000922
+// vom 2026-09-30: Outline-Farbe, Static Quadrant, negatives Gap, 64 Shapes).
 //
 // Zwei Schichten, wie im Spiel:
-//   1. Geometrie (CPU, csgo_crosshair.cpp): Cvars -> Liste von max. 16 Shapes
+//   1. Geometrie (CPU, csgo_crosshair.cpp): Cvars -> Liste von max. 64 Shapes
 //      (Rect / Kreisring / Quad-Bogensegmente) mit Fuell- und Outline-Farbe.
 //      -> buildShapes(). Formeln aus dem Ghidra-Decompilat von libclient.so,
 //         siehe ~/projects/cs2-re/NOTES.md; per Screenshot zu verifizieren.
@@ -11,7 +12,7 @@
 //      -> shadePixel().
 //
 // Gerendert wird per Canvas in echten Spielpixeln der simulierten Aufloesung
-// (preview-settings: Default 1280x960, die Spielaufloesung des Streamers) und als
+// (preview-settings: Default 1920x1080) und als
 // <image> in das SVG gelegt, dessen viewBox 1 Einheit = 1 Spielpixel ist
 // (Zoom = viewBox-Crop). Das Spiel skaliert die Cvar-Werte mit
 // Hoehe / cl_crosshair_screen_height — die Vorschau tut dasselbe (scalePx).
@@ -113,7 +114,7 @@ export function shadePixel(shapes, px, py, out) {
 }
 
 // ---------------------------------------------------------------------------
-// Geometrie (CPU-Seite) — aus libclient.so (Build 25.09.2026) per Ghidra/Disassembly
+// Geometrie (CPU-Seite) — aus libclient.so (Build 2000922, 30.09.2026) per Ghidra/Disassembly
 // abgeleitet, siehe ~/projects/cs2-re/NOTES.md. Alle Cvars sind Integer-Pixel bei der
 // Bezugshoehe cl_crosshair_screen_height; das Spiel skaliert sie beim Aufloesungs-
 // wechsel auf die aktuelle Hoehe um (Rundung: siehe scalePx, per Screenshot zu belegen).
@@ -122,14 +123,22 @@ export function shadePixel(shapes, px, py, out) {
 function num(v, d) { const n = Number(v); return Number.isFinite(n) ? n : d; }
 function clamp(v, lo, hi) { return Math.min(Math.max(v, lo), hi); }
 
-// Umrechnung Bezugshoehe -> Bildschirmhoehe, exakt wie CCSGO_Crosshair (VMA 1befb70):
+// Umrechnung Bezugshoehe -> Bildschirmhoehe, exakt wie das Spiel (VMA 1bed2f0):
 // factor = H / screen_height; v > 0 -> max(1, roundf(v * factor)); 0 bleibt 0.
-// Gilt fuer gap, length, thickness, dynamic_spread_limit und dynamic_splitdist.
+// Gilt fuer length, thickness, dynamic_spread_limit und dynamic_splitdist.
 function roundHalfAway(x) { return x < 0 ? -Math.round(-x) : Math.round(x); }
 export function scalePx(v, refH, screenH) {
   if (!(v > 0)) return 0;
   if (refH === screenH) return v;
   return Math.max(1, roundHalfAway(v * screenH / refH));
+}
+// Gap ist seit 2026-09-30 vorzeichenbehaftet: negative Werte bleiben beim Umrechnen
+// negativ (v < 0 -> min(-1, roundf(v * factor))).
+export function scaleGap(v, refH, screenH) {
+  if (v > 0) return scalePx(v, refH, screenH);
+  if (!(v < 0)) return 0;
+  if (refH === screenH) return v;
+  return Math.min(-1, roundHalfAway(v * screenH / refH));
 }
 
 // Dicke -> (n, hi, lo, odd) wie im Spiel: n = round(t) >= 1, hi = (n+1)>>1, lo = n-hi.
@@ -148,15 +157,15 @@ function outlineExt(mode) {
   return { ol: [0, 0], on: false };
 }
 
-// Dynamische Distanz (this+0xe0) aus dem Spread in Pixeln.
-export function dynamicDistance(spreadPx, { spreadLimit, outlineMode, dot, thickness }) {
+// Dynamische Distanz aus dem Spread in Pixeln. Seit Build 2000922 ist die Untergrenze
+// nur noch die Dot-Groesse (vorher zusaetzlich 1 bzw. 2 px je Outline-Modus).
+export function dynamicDistance(spreadPx, { spreadLimit, dot, thickness }) {
   const maxD = spreadLimit + 64;
   const knee = 0.75 * maxD;
   let s = spreadPx;
   if (s > knee) s = maxD - (maxD - knee) * Math.exp(-(s - knee) / (maxD - knee));
   s = Math.min(s, maxD);
-  let minDist = outlineMode === 1 ? 2 : 1;
-  if (dot) minDist += thickness;
+  const minDist = dot ? thickness : 0;
   s = Math.max(s, minDist);
   return Math.trunc(s);
 }
@@ -166,12 +175,19 @@ export function dynamicDistance(spreadPx, { spreadLimit, outlineMode, dot, thick
 //   opts.kick:     Legacy-Rueckstosswert (Style 5), 0..25, steigt je Schuss um 15, faellt 42/s
 export function buildShapes(params, screenH = SCREEN_H, screenW = SCREEN_W, opts = {}) {
   const p = params || {};
-  const style = clamp(Math.round(num(p.cl_crosshairstyle, 4)), 0, 8);
+  const style = clamp(Math.round(num(p.cl_crosshairstyle, 4)), 0, 9);
   const refH = Math.max(240, num(p.cl_crosshair_screen_height, 1080));
-  const length = scalePx(clamp(num(p.cl_crosshair_length, 8), 0, 255), refH, screenH);
-  const t = scalePx(clamp(num(p.cl_crosshair_thickness, 2), 0, 31), refH, screenH);
-  const gap = scalePx(clamp(num(p.cl_crosshair_gap, 4), 0, 128), refH, screenH);
-  const spreadLimit = scalePx(clamp(num(p.cl_crosshair_dynamic_spread_limit, 255), 0, 255), refH, screenH);
+  // Nach dem Umrechnen schreibt das Spiel die Werte in die Cvars zurueck (VMA 1bfa340); deren
+  // Setter clampt auf die Cvar-Range. Ab dem zweiten Frame gelten also auch fuer die
+  // umgerechneten Werte length <= 255, thickness <= 32, spread_limit <= 255, splitdist <= 127
+  // und |gap| <= 3840 — deshalb hier Clamp vor UND nach dem Skalieren.
+  const length = Math.min(255, scalePx(clamp(num(p.cl_crosshair_length, 8), 0, 255), refH, screenH));
+  const t = Math.min(32, scalePx(clamp(num(p.cl_crosshair_thickness, 2), 0, 32), refH, screenH));
+  // Gap kann negativ sein. Wirksam ist das nur im Classic-Style; alle anderen Styles
+  // clampen beim Zeichnen auf 0 (Cross, Square) bzw. 1 (Kreis, Static Quadrant).
+  const gap = clamp(scaleGap(clamp(num(p.cl_crosshair_gap, 4), -3840, 3840), refH, screenH), -3840, 3840);
+  const gap0 = Math.max(0, gap);
+  const spreadLimit = Math.min(255, scalePx(clamp(num(p.cl_crosshair_dynamic_spread_limit, 255), 0, 255), refH, screenH));
   const dot = num(p.cl_crosshairdot, 0) === 1;
   const tStyle = num(p.cl_crosshair_t, 0) === 1;
   const outlineMode = clamp(Math.round(num(p.cl_crosshair_drawoutline, 1)), 0, 2);
@@ -185,7 +201,15 @@ export function buildShapes(params, screenH = SCREEN_H, screenW = SCREEN_W, opts
     clamp(num(p.cl_crosshaircolor_b, 0), 0, 255) / 255,
     alpha,
   ];
-  const outline = [0, 0, 0, outlineOn ? alpha : 0];
+  // Outline-Farbe und -Deckkraft kommen seit 2026-09-30 aus eigenen Cvars
+  // (vorher Schwarz mit der Deckkraft des Crosshairs). Ohne Outline: komplett 0.
+  const outlineAlpha = clamp(num(p.cl_crosshairoutline_a, 255), 0, 255) / 255;
+  const outline = outlineOn ? [
+    clamp(num(p.cl_crosshairoutline_r, 0), 0, 255) / 255,
+    clamp(num(p.cl_crosshairoutline_g, 0), 0, 255) / 255,
+    clamp(num(p.cl_crosshairoutline_b, 0), 0, 255) / 255,
+    outlineAlpha,
+  ] : [0, 0, 0, 0];
 
   const cx = Math.trunc(screenW / 2);
   const cy = Math.trunc(screenH / 2);
@@ -194,8 +218,9 @@ export function buildShapes(params, screenH = SCREEN_H, screenW = SCREEN_W, opts
   const rect = (x0, y0, x1, y1) => shapes.push({ type: 0, a: [x0, y0, x1 - 1, y1 - 1], m1: 0, ol, fill, outline });
   const ring = (type, c, outer, w, m1) => shapes.push({ type, a: [cx - c - 0.5, cy - c - 0.5, outer, w], m1, ol, fill, outline });
 
-  const crossWith = (dist, len, f, o) => {
+  const crossWith = (rawDist, len, f, o) => {
     if (len <= 0 || t <= 0) return;
+    const dist = Math.max(0, rawDist); // das Spiel clampt negative Distanzen auf 0
     const { hi, lo, odd } = thick(t);
     const adj = odd ? -1 : 0;
     const L = Math.floor(cx - dist);
@@ -222,7 +247,7 @@ export function buildShapes(params, screenH = SCREEN_H, screenW = SCREEN_W, opts
     shapes.push({ type: 0, a: [cx - hi, cy - hi, cx + lo - 1, cy + lo - 1], m1: 0, ol, fill, outline });
   };
 
-  const e0 = dynamicDistance(spreadPx, { spreadLimit, outlineMode, dot, thickness: t });
+  const e0 = dynamicDistance(spreadPx, { spreadLimit, dot, thickness: t });
 
   if (dot || style === 6) drawDot();
 
@@ -230,10 +255,12 @@ export function buildShapes(params, screenH = SCREEN_H, screenW = SCREEN_W, opts
     case 0: cross(e0); break;
     case 1: circle(e0); break;
     case 2: {
-      // Classic (VMA 1bf2f10): Spread in 480er-Einheiten (spread01), Pixel = roundf(H/480 * spread01).
+      // Classic (VMA 1beb460): Spread in 480er-Einheiten (spread01), Pixel = roundf(H/480 * spread01).
       // Split, sobald spread01 > splitdist: innere Balken bei splitPx + gap mit alpha*innermod,
-      // aeussere bei spreadPx + gap + innerLen mit alpha*outermod.
-      const splitdist = clamp(num(p.cl_crosshair_dynamic_splitdist, 3), 0, 127);
+      // aeussere bei spreadPx + gap + innerLen mit alpha*outermod. Gap darf hier negativ sein:
+      // es verkuerzt die Distanz, die Balken bleiben aber bei >= 0 (Clamp in crossWith).
+      // splitdist wird wie die anderen Groessen auf die aktuelle Hoehe umgerechnet.
+      const splitdist = Math.min(127, scalePx(clamp(num(p.cl_crosshair_dynamic_splitdist, 3), 0, 127), refH, screenH));
       const inner = clamp(num(p.cl_crosshair_dynamic_splitalpha_innermod, 0), 0, 1);
       const outer = clamp(num(p.cl_crosshair_dynamic_splitalpha_outermod, 1), 0.3, 1);
       const ratio = clamp(num(p.cl_crosshair_dynamic_maxdist_splitratio, 1), 0, 1);
@@ -242,10 +269,18 @@ export function buildShapes(params, screenH = SCREEN_H, screenW = SCREEN_W, opts
       const splitPx = roundHalfAway(screenH / 480 * Math.min(splitdist, spread01));
       if (sPx <= 0) { cross(gap); break; }              // stehend; Laufen/Ducken nur im Spiel (+2/-2/+4)
       if (spread01 > splitdist) {
-        const innerLen = Math.ceil((1 - ratio) * length);
-        const outerLen = Math.floor(ratio * length);
+        // Das Spiel rechnet hier in float32 (subss/mulss/roundss bzw. cvttss2si). In double kippen
+        // einzelne Faelle um 1 px bzw. 1 Alpha-Stufe (z.B. ratio 0.7, length 10: innen 3 statt 4).
+        const f = Math.fround;
+        const innerLen = Math.ceil(f(f(1 - f(ratio)) * length));
+        const outerLen = Math.floor(f(length * f(ratio)));
+        // Fill- und Outline-Alpha werden beide mit trunc(alpha * mod) skaliert.
         const a255 = Math.round(alpha * 255);
-        const withAlpha = (mod) => { const a = Math.trunc(a255 * mod) / 255; return { fill: [fill[0], fill[1], fill[2], a], outline: [0, 0, 0, outlineOn ? a : 0] }; };
+        const o255 = Math.round(outline[3] * 255);
+        const withAlpha = (mod) => ({
+          fill: [fill[0], fill[1], fill[2], Math.trunc(f(a255 * f(mod))) / 255],
+          outline: [outline[0], outline[1], outline[2], Math.trunc(f(o255 * f(mod))) / 255],
+        });
         const o = withAlpha(outer), i = withAlpha(inner);
         crossWith(sPx + gap + innerLen, outerLen, o.fill, o.outline);
         crossWith(splitPx + gap, innerLen, i.fill, i.outline);
@@ -257,14 +292,15 @@ export function buildShapes(params, screenH = SCREEN_H, screenW = SCREEN_W, opts
     case 5: {
       // Legacy (VMA 1bf3240): dist = roundf(gap + H/1200 * kick), kick += 15 je Schuss, max 25, -42/s.
       const kick = Math.max(0, Math.min(25, num(opts.kick, 0)));
-      cross(roundHalfAway(gap + screenH / 1200 * kick));
+      cross(roundHalfAway(gap0 + screenH / 1200 * kick));
       break;
     }
     case 3: circle(Math.max(1, gap)); break;
-    case 4: cross(gap); break;
+    case 4: cross(gap0); break;
     case 7: {
-      cross(gap);
-      if (spreadPx > 0 && t > 0) {
+      cross(gap0);
+      // Der Ring haengt nur am Spread; anders als das Kreuz prueft das Spiel hier nicht auf thickness > 0.
+      if (spreadPx > 0) {
         const { odd } = thick(t);
         if (spreadPx < 100 && spreadPx <= 10) {
           ring(1, (odd && t >= 1) ? 0.5 : 0, e0 + Math.max(1, t - 1), Math.max(1, t - 1), 0);
@@ -278,17 +314,26 @@ export function buildShapes(params, screenH = SCREEN_H, screenW = SCREEN_W, opts
       if (t <= 0) break;
       const { odd } = thick(t);
       const adj = (odd && dot) ? -1 : 0;
-      const xr = Math.floor(cx + gap), x0 = Math.floor(cx - gap - t + adj);
-      const yb = Math.floor(cy + gap), y0 = Math.floor(cy - gap - t + adj);
+      const xr = Math.floor(cx + gap0), x0 = Math.floor(cx - gap0 - t + adj);
+      const yb = Math.floor(cy + gap0), y0 = Math.floor(cy - gap0 - t + adj);
       rect(x0, y0, xr, y0 + t);
       rect(x0, yb, xr, yb + t);
       rect(x0, y0, x0 + t, yb + t);
       rect(xr, y0, xr + t, yb + t);
       break;
     }
+    case 9: {
+      // Static Quadrant (VMA 1bec1e0): vier Bogensegmente auf den Diagonalen, Radius aus dem Gap,
+      // Winkelbreite je Segment = Quadrant Size * 90 Grad (1 = geschlossener Ring).
+      // Das Spiel prueft hier NICHT auf thickness > 0.
+      const { odd } = thick(t);
+      const ratio = clamp(num(p.cl_crosshair_dynamic_maxdist_splitratio, 1), 0, 1);
+      ring(2, (odd && t >= 1) ? 0.5 : 0, Math.max(1, gap) + t, t, ratio * 90 * Math.PI / 180);
+      break;
+    }
     default: break;
   }
-  return shapes.slice(0, 16);
+  return shapes.slice(0, 64);
 }
 
 // ---------------------------------------------------------------------------

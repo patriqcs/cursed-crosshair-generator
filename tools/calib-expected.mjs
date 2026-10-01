@@ -2,6 +2,7 @@
 // Kalibrierfall in einem Ausschnitt um die Bildmitte und schreibt sie als Raw-RGBA.
 //   node tools/calib-expected.mjs data/calibration-v2 [W H]
 import { buildShapes, shadePixel } from '../public/js/preview.js';
+import { fillMissingOutline } from '../public/js/cvars.js';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 
 const dir = process.argv[2] || 'data/calibration-v2';
@@ -11,12 +12,15 @@ mkdirSync(`${dir}/expected`, { recursive: true });
 const meta = [];
 for (const c of cases) {
   if (c.res !== '1080') continue;
-  const R = c.n === '14' ? 150 : 64;
+  const R = c.r || (c.n === '14' ? 150 : 64);
   const cx = Math.trunc(W / 2), cy = Math.trunc(H / 2);
   // Shader-Eingang wie im Spiel: Cvar-Farbe sRGB -> linear, dann Shader (premultiplied).
   const s2l = (v) => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
-  const shapes = buildShapes(c.params, H, W, { spreadPx: 0 }).map((sh) => ({
-    ...sh, fill: [s2l(sh.fill[0]), s2l(sh.fill[1]), s2l(sh.fill[2]), sh.fill[3]],
+  // Faelle von vor dem 2026-09-30 haben keine Outline-Farbe: Schwarz mit Crosshair-Alpha,
+  // so wie die Screenshots damals entstanden sind. Outline-Farbe wird wie die Fuellfarbe linearisiert.
+  const lin = (c4) => [s2l(c4[0]), s2l(c4[1]), s2l(c4[2]), c4[3]];
+  const shapes = buildShapes(fillMissingOutline(c.params), H, W, { spreadPx: 0 }).map((sh) => ({
+    ...sh, fill: lin(sh.fill), outline: lin(sh.outline),
   }));
   const w = 2 * R, h = 2 * R;
   // Float32 [r_pm_lin, g_pm_lin, b_pm_lin, a] pro Pixel

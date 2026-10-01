@@ -10,7 +10,7 @@
 // Ergebnis mit `migrated: true` markiert, damit der Admin die Werte prueft.
 
 import { parseCommands } from './commands.js';
-import { normalizeParams, isLegacyParams } from './cvars.js';
+import { normalizeParams, isLegacyParams, fillMissingOutline } from './cvars.js';
 import { migrateLegacyParams } from './migrate.js';
 
 // Bezugshoehe fuer die Umrechnung alter Cfgs. Der alte Exporter kannte keine
@@ -46,7 +46,8 @@ function toParams(raw) {
   }
   // normalizeParams liefert null bei ungueltigen Werten (z.B. unbekannter
   // Style) — dann Defaults, statt den ganzen Import abzubrechen.
-  const params = normalizeParams(src) || normalizeParams({});
+  // Cfgs von vor dem 2026-09-30 haben keine Outline-Farbe -> Schwarz mit Crosshair-Alpha.
+  const params = normalizeParams(fillMissingOutline(src)) || normalizeParams({});
   return { params, migrated: false };
 }
 

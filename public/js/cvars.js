@@ -1,9 +1,11 @@
 // Gemeinsames Cvar-Modell fuer das CS2-Crosshair-System seit dem "Rush Hour"-Update
-// (1.41.8.1, Build 2000913, 2026-09-22; Half-Outline + Static Square seit 1.41.8.3, 2026-09-24).
+// (1.41.8.1, Build 2000913, 2026-09-22; Half-Outline + Static Square seit 1.41.8.3, 2026-09-24;
+// Outline-Farbe, Static Quadrant, Thickness 32 und negatives Gap seit 1.41.8.8, 2026-09-30).
 //
-// Quelle der Ranges/Defaults: SteamDB GameTracking-CS2, DumpSource2/convars.txt (Build 2000918).
+// Quelle der Ranges/Defaults: SteamDB GameTracking-CS2, DumpSource2/convars.txt (Build 2000922).
 // Das Spiel clampt Werte hart auf diese Ranges — "cursed" heisst seither Extremwerte
-// innerhalb dieser Grenzen. Alte Cvars (cl_crosshairsize, cl_crosshairgap, ...) existieren
+// innerhalb dieser Grenzen. Wie der Renderer die Werte verwendet (z.B. negatives Gap nur
+// im Classic-Style wirksam), steht in preview.js bzw. ~/projects/cs2-re/NOTES.md. Alte Cvars (cl_crosshairsize, cl_crosshairgap, ...) existieren
 // nicht mehr bzw. sind hidden; siehe migrate.js.
 //
 // Wird vom Browser (ESM) UND vom Server (require(esm), Node >= 22) geladen — keine
@@ -14,11 +16,12 @@ export const STYLES = Object.freeze([
   { value: 3, label: 'Static Circle',                      dynamic: false },
   { value: 8, label: 'Static Square',                      dynamic: false },
   { value: 6, label: 'Dot Only',                           dynamic: false },
+  { value: 9, label: 'Static Quadrant',                    dynamic: false },
   { value: 0, label: 'Dynamic Cross',                      dynamic: true },
   { value: 1, label: 'Dynamic Circle',                     dynamic: true },
   { value: 2, label: 'Dynamic Cross (Classic)',            dynamic: true },
   { value: 5, label: 'Dynamic Cross (Legacy/Shot Feedback)', dynamic: true },
-  { value: 7, label: 'Dynamic Quad',                       dynamic: true },
+  { value: 7, label: 'Dynamic Quadrant',                   dynamic: true },
 ]);
 // Reihenfolge wie im CS2-Settings-Dropdown (settings_crosshair.xml).
 
@@ -31,10 +34,12 @@ export const OUTLINE_MODES = Object.freeze([
 // type: 'int' | 'float' | 'bool' | 'enum'
 // group: 'core' (immer im Editor) | 'dynamic' | 'classic' | 'advanced'
 export const CVARS = Object.freeze({
-  cl_crosshairstyle:                      { type: 'enum',  values: [0,1,2,3,4,5,6,7,8], default: 4,    group: 'core' },
+  cl_crosshairstyle:                      { type: 'enum',  values: [0,1,2,3,4,5,6,7,8,9], default: 4,    group: 'core' },
   cl_crosshair_length:                    { type: 'int',   min: 0,   max: 255,   default: 8,    group: 'core' },
-  cl_crosshair_thickness:                 { type: 'int',   min: 0,   max: 31,    default: 2,    group: 'core' },
-  cl_crosshair_gap:                       { type: 'int',   min: 0,   max: 128,   default: 4,    group: 'core' },
+  cl_crosshair_thickness:                 { type: 'int',   min: 0,   max: 32,    default: 2,    group: 'core' },
+  // Cvar-Range seit 2026-09-30: -3840..3840 (Spielmenue: 0..128, Classic -10..128). Negative
+  // Werte wirken nur im Classic-Style (2); alle anderen Styles zeichnen sie wie 0 bzw. 1.
+  cl_crosshair_gap:                       { type: 'int',   min: -3840, max: 3840, default: 4,   group: 'core' },
   cl_crosshairdot:                        { type: 'bool',  default: 0, group: 'core' },
   cl_crosshair_t:                         { type: 'bool',  default: 0, group: 'core' },
   cl_crosshair_recoil:                    { type: 'bool',  default: 0, group: 'core' },
@@ -43,11 +48,21 @@ export const CVARS = Object.freeze({
   cl_crosshaircolor_g:                    { type: 'int',   min: 0,   max: 255,   default: 255,  group: 'core' },
   cl_crosshaircolor_b:                    { type: 'int',   min: 0,   max: 255,   default: 0,    group: 'core' },
   cl_crosshaircolor_a:                    { type: 'int',   min: 0,   max: 255,   default: 255,  group: 'core' },
+  // Outline-Farbe und -Deckkraft (seit 2026-09-30); wirken nur bei drawoutline != 0.
+  cl_crosshairoutline_r:                  { type: 'int',   min: 0,   max: 255,   default: 0,    group: 'core' },
+  cl_crosshairoutline_g:                  { type: 'int',   min: 0,   max: 255,   default: 0,    group: 'core' },
+  cl_crosshairoutline_b:                  { type: 'int',   min: 0,   max: 255,   default: 0,    group: 'core' },
+  cl_crosshairoutline_a:                  { type: 'int',   min: 0,   max: 255,   default: 255,  group: 'core' },
   cl_crosshair_dynamic_spread_limit:      { type: 'int',   min: 0,   max: 255,   default: 255,  group: 'dynamic' },
   cl_crosshair_dynamic_splitdist:         { type: 'int',   min: 0,   max: 127,   default: 3,    group: 'classic' },
-  cl_crosshair_dynamic_splitalpha_innermod: { type: 'float', min: 0,   max: 1, step: 0.05, default: 0, group: 'classic' },
-  cl_crosshair_dynamic_splitalpha_outermod: { type: 'float', min: 0.3, max: 1, step: 0.05, default: 1, group: 'classic' },
+  // Raster seit 2026-09-30: 0.01 (vorher 0.05) im Menue und im Share-Code.
+  cl_crosshair_dynamic_splitalpha_innermod: { type: 'float', min: 0,   max: 1, step: 0.01, default: 0, group: 'classic' },
+  cl_crosshair_dynamic_splitalpha_outermod: { type: 'float', min: 0.3, max: 1, step: 0.01, default: 1, group: 'classic' },
   cl_crosshair_dynamic_maxdist_splitratio:  { type: 'float', min: 0,   max: 1, step: 0.01, default: 1, group: 'classic' },
+  // Scope-Dot (AUG/SG): seit 2026-09-30 Teil des Crosshair-Settings-Structs und des Share-Codes.
+  // Wird exportiert, aber in der Vorschau nicht gezeichnet (nur im Zoom sichtbar).
+  cl_ironsight_usecrosshaircolor:         { type: 'bool',  default: 0, group: 'scope' },
+  cl_ironsight_dot_scale:                 { type: 'float', min: 0.1, max: 2, step: 0.01, default: 1, group: 'scope' },
   // Bezugshoehe fuer die Pixelwerte; das Spiel skaliert mit aktuelleHoehe / screen_height.
   // Hidden-Cvar; wird vom Spiel bei jeder Size-Aenderung ueberschrieben -> im .cfg IMMER
   // als letztes setzen.
@@ -57,17 +72,20 @@ export const CVARS = Object.freeze({
 export const CVAR_KEYS = Object.freeze(Object.keys(CVARS));
 
 // Welche Regler das Spiel je Style anzeigt (settingsmenu_crosshair.js, OnCrosshairStyleChange).
-// Outline, Thickness, Farbe/Alpha, Recoil sind immer sichtbar.
+// Outline, Thickness, Farbe/Alpha, Recoil sind immer sichtbar; die Outline-Farbe nur bei
+// drawoutline != 0. cl_crosshair_dynamic_maxdist_splitratio hat zwei Rollen: "Split Size
+// Ratio" im Classic-Style (2) und "Quadrant Size" im Static Quadrant (9).
 const VIS = {
   0: ['dot', 'gap', 'length', 't', 'spread'],
   1: ['dot', 'spread'],
-  2: ['dot', 'gap', 'length', 't', 'classic'],
+  2: ['dot', 'gap', 'length', 't', 'classic', 'ratio'],
   3: ['dot', 'gap'],
   4: ['dot', 'gap', 'length', 't'],
   5: ['dot', 'gap', 'length', 't'],
   6: [],
   7: ['dot', 'gap', 'length', 't', 'spread'],
   8: ['dot', 'gap'],
+  9: ['dot', 'gap', 'ratio'],
 };
 const KEY_FEATURE = {
   cl_crosshairdot: 'dot',
@@ -78,11 +96,19 @@ const KEY_FEATURE = {
   cl_crosshair_dynamic_splitdist: 'classic',
   cl_crosshair_dynamic_splitalpha_innermod: 'classic',
   cl_crosshair_dynamic_splitalpha_outermod: 'classic',
-  cl_crosshair_dynamic_maxdist_splitratio: 'classic',
+  cl_crosshair_dynamic_maxdist_splitratio: 'ratio',
 };
+const OUTLINE_COLOR_KEYS = new Set([
+  'cl_crosshairoutline_r', 'cl_crosshairoutline_g', 'cl_crosshairoutline_b', 'cl_crosshairoutline_a',
+]);
 
 // true, wenn der Cvar fuer den gegebenen Style im Spiel eine Wirkung hat.
-export function isRelevant(key, style) {
+// `params` ist optional; damit wird zusaetzlich die Outline-Farbe bei
+// cl_crosshair_drawoutline 0 als wirkungslos erkannt.
+export function isRelevant(key, style, params = null) {
+  if (OUTLINE_COLOR_KEYS.has(key)) {
+    return !params || Number(params.cl_crosshair_drawoutline) !== 0;
+  }
   const f = KEY_FEATURE[key];
   if (!f) return true;
   const list = VIS[style] || VIS[4];
@@ -152,6 +178,24 @@ export function normalizeParams(input, { strict = false } = {}) {
     out[k] = v;
   }
   return out;
+}
+
+// Params aus der Zeit vor dem Update vom 2026-09-30 kennen keine Outline-Farbe. Damals
+// zeichnete das Spiel die Outline schwarz mit der Deckkraft des Crosshairs; genau so
+// rechnet der Client alte Share-Codes um (Outline-RGB 0, Outline-Alpha = Crosshair-Alpha).
+// Gibt ein neues Objekt zurueck; Params mit Outline-Keys bleiben unveraendert.
+export function fillMissingOutline(p) {
+  if (!p || typeof p !== 'object') return p;
+  if ('cl_crosshairoutline_a' in p || 'cl_crosshairoutline_r' in p
+    || 'cl_crosshairoutline_g' in p || 'cl_crosshairoutline_b' in p) return p;
+  if (!('cl_crosshaircolor_a' in p)) return p;
+  return {
+    ...p,
+    cl_crosshairoutline_r: 0,
+    cl_crosshairoutline_g: 0,
+    cl_crosshairoutline_b: 0,
+    cl_crosshairoutline_a: p.cl_crosshaircolor_a,
+  };
 }
 
 // Erkennung alter Param-Objekte (vor dem Update).

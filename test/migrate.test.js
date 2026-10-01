@@ -104,7 +104,18 @@ test('negative gaps clamp to 0 (no negative distances in the new system)', () =>
 test('oversized legacy values are clamped into the new cvar ranges', () => {
   const r = migrateLegacyParams({ ...LEGACY_GREEN, cl_crosshairsize: 500, cl_crosshairthickness: 30 }, { screenHeight: 960 });
   assert.equal(r.cl_crosshair_length, 255);
-  assert.equal(r.cl_crosshair_thickness, 31);
+  assert.equal(r.cl_crosshair_thickness, 32);
+});
+
+test('outline color: black with the crosshair alpha (how the old outline was drawn)', () => {
+  const opaque = migrateLegacyParams({ ...LEGACY_GREEN }, { screenHeight: 960 });
+  assert.deepEqual(
+    [opaque.cl_crosshairoutline_r, opaque.cl_crosshairoutline_g, opaque.cl_crosshairoutline_b, opaque.cl_crosshairoutline_a],
+    [0, 0, 0, 255],
+  );
+  const translucent = migrateLegacyParams({ ...LEGACY_GREEN, cl_crosshairusealpha: 1, cl_crosshairalpha: 120 }, { screenHeight: 960 });
+  assert.equal(translucent.cl_crosshaircolor_a, 120);
+  assert.equal(translucent.cl_crosshairoutline_a, 120);
 });
 
 test('outline: drawoutline 1 with outlinethickness > 0 -> full outline (1)', () => {
