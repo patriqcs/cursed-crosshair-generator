@@ -378,6 +378,12 @@ function buildRgb(field, params, onChange) {
   const picker = el('input', { type: 'color', value: rgbToHex(params, prefix) });
   row.appendChild(picker);
 
+  // Der Windows-Farbdialog (Firefox) laesst die Helligkeit beim Klick in den Farbverlauf
+  // unveraendert: von Schwarz aus bleibt jede dort gewaehlte Farbe schwarz. Hinweis nur dann.
+  const blackNote = el('div', { class: 'field-note' },
+    'Picking from black? In the Windows color dialog, drag the brightness slider on the right up, or the color stays black.');
+  const syncNote = () => { blackNote.hidden = rgbToHex(params, prefix) !== '#000000'; };
+
   const inputs = {};
   for (const ch of ['r', 'g', 'b']) {
     const key = `${prefix}${ch}`;
@@ -389,6 +395,7 @@ function buildRgb(field, params, onChange) {
       const v = clamp(Math.round(Number(inp.value)), 0, 255);
       params[key] = v;
       picker.value = rgbToHex(params, prefix);
+      syncNote();
       onChange();
     });
     inputs[ch] = inp;
@@ -403,10 +410,13 @@ function buildRgb(field, params, onChange) {
     inputs.r.value = String(r);
     inputs.g.value = String(g);
     inputs.b.value = String(b);
+    syncNote();
     onChange();
   });
 
   wrap.appendChild(row);
+  wrap.appendChild(blackNote);
+  syncNote();
   return wrap;
 }
 
