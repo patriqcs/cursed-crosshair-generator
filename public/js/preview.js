@@ -17,7 +17,7 @@
 // (Zoom = viewBox-Crop). Das Spiel skaliert die Cvar-Werte mit
 // Hoehe / cl_crosshair_screen_height — die Vorschau tut dasselbe (scalePx).
 
-import { onChange, getSettings, getResolution } from './preview-settings.js';
+import { onChange, getSettings, getResolution, isDynamicPreview } from './preview-settings.js';
 import { getBgPixels, onBgChange } from './bg.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -50,7 +50,9 @@ function halfWeight(theta) {
 //   type 1 Ring:   a = [cx, cy, outerRadius, thickness]
 //   type 2 Quad:   wie Ring, m1 = volle Winkelbreite der 4 Bogensegmente (rad)
 //   ol = [outlineTopLeft, outlineBottomRight] in Pixeln
-// Rueckgabe [outlineMask, fillMask] in 0..1
+// Rueckgabe [outlineMask, fillMask] in 0..1. Das Ergebnis-Array wird wiederverwendet (der
+// Rasterizer ruft das pro Pixel und Shape auf) — sofort auslesen, nicht aufheben.
+const MASK = [0, 0];
 function shapeMask(s, px, py) {
   const a = s.a;
   if (s.type === 1) {
@@ -61,10 +63,9 @@ function shapeMask(s, px, py) {
     const k = halfWeight(theta);
     const outerO = a[2] + lerp(s.ol[0], s.ol[1], k);
     const innerO = inner - lerp(s.ol[1], s.ol[0], k);
-    return [
-      smoothstep(outerO + 0.5, outerO - 0.5, r) * smoothstep(innerO - 0.5, innerO + 0.5, r),
-      smoothstep(a[2] + 0.5, a[2] - 0.5, r) * smoothstep(inner - 0.5, inner + 0.5, r),
-    ];
+    MASK[0] = smoothstep(outerO + 0.5, outerO - 0.5, r) * smoothstep(innerO - 0.5, innerO + 0.5, r);
+    MASK[1] = smoothstep(a[2] + 0.5, a[2] - 0.5, r) * smoothstep(inner - 0.5, inner + 0.5, r);
+    return MASK;
   }
   if (s.type === 2) {
     const dx = px - a[0], dy = py - a[1];
@@ -85,12 +86,14 @@ function shapeMask(s, px, py) {
     const radialF = smoothstep(a[2] + 0.5, a[2] - 0.5, r) * smoothstep(inner - 0.5, inner + 0.5, r);
     const angO = smoothstep(hw + (ol + 0.5) * invR, hw + (ol - 0.5) * invR, ang);
     const angF = smoothstep(hw + half, hw - half, ang);
-    return [radialO * angO, radialF * angF];
+    MASK[0] = radialO * angO;
+    MASK[1] = radialF * angF;
+    return MASK;
   }
   // Rect, harte Integer-Tests (kein Anti-Aliasing)
-  const o = (px >= a[0] - s.ol[0] && py >= a[1] - s.ol[0] && px <= a[2] + s.ol[1] && py <= a[3] + s.ol[1]) ? 1 : 0;
-  const f = (px >= a[0] && py >= a[1] && px <= a[2] && py <= a[3]) ? 1 : 0;
-  return [o, f];
+  MASK[0] = (px >= a[0] - s.ol[0] && py >= a[1] - s.ol[0] && px <= a[2] + s.ol[1] && py <= a[3] + s.ol[1]) ? 1 : 0;
+  MASK[1] = (px >= a[0] && py >= a[1] && px <= a[2] && py <= a[3]) ? 1 : 0;
+  return MASK;
 }
 
 // Liefert premultiplied RGBA (0..1) fuer ein Pixel.
@@ -355,47 +358,89 @@ function l2s(l) {
   return Math.round(255 * (l <= 0.0031308 ? l * 12.92 : 1.055 * Math.pow(l, 1 / 2.4) - 0.055));
 }
 
-// Rendert die Shapes in ein Canvas (nur die Bounding-Box) und liefert
-// { canvas, x, y, w, h } in Bildschirmpixeln.
+// Innenradius, unterhalb dessen ein Ring (Typ 1/2) exakt 0 liefert: Fill ab inner - 0.5,
+// Outline ab inner - max(ol) - 0.5. Mit 1 px Reserve; -1 = kein Loch.
+function holeRadius(s) {
+  if (s.type === 0) return -1;
+  const rin = s.a[2] - s.a[3] - Math.max(s.ol[0], s.ol[1]) - 1;
+  return rin > 0 ? rin : -1;
+}
+
+// Rechnet die Shapes in RGBA-Pixel (nur die Bounding-Box auf dem Bildschirm) und liefert
+// { data, x, y, w, h } oder null. Reine Rechnung ohne DOM (auch in Node testbar).
 //
 // Blend-Modell des Spiels (per Screenshot belegt, data/calibration-v2): der Shader
 // liefert premultiplied rgb_pm und a; der Blend-State ist SRC_ALPHA / ONE_MINUS_SRC_ALPHA
 // auf einem sRGB-Framebuffer, also in linearem Licht:
 //   out_lin = rgb_pm * a + dst_lin * (1 - a),  rgb_pm = srgb2lin(farbe) * a
-// Mit bekanntem Hintergrund (bgPixels, 1280x960 ImageData) wird exakt so gemischt und
+// Mit bekanntem Hintergrund (bgPixels, ImageData in Bildschirmgroesse) wird exakt so gemischt und
 // opak ausgegeben; ohne Hintergrund als Naeherung straight-alpha (rgb_pm, a).
-export function rasterize(shapes, screenW = SCREEN_W, screenH = SCREEN_H, bgPixels = null) {
+//
+// Geschwindigkeit: Die Bounding-Box eines grossen Crosshairs ist fast leer (lange Balken,
+// Ring mit Loch). Der Shader wird deshalb nur fuer Pixel gerechnet, die in der Box mindestens
+// einer Shape liegen (und bei Ringen ausserhalb des Lochs), und nur mit diesen Shapes. Das
+// Ergebnis ist identisch: eine Shape mit Maske 0 aendert das Compositing nicht. Vorher
+// kostete ein extremes Preset 65 bis 235 ms pro Bild, die Dynamic Preview stockte.
+export function rasterizePixels(shapes, screenW = SCREEN_W, screenH = SCREEN_H, bgPixels = null) {
   if (!shapes.length) return null;
+  const n = shapes.length;
+  const bounds = new Array(n);
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-  for (const s of shapes) {
-    const b = shapeBounds(s);
+  for (let i = 0; i < n; i++) {
+    const b = shapeBounds(shapes[i]);
+    bounds[i] = b;
+    // Shapes ganz ausserhalb des Bildschirms zaehlen nicht zur Box: sonst spannen vier Balken
+    // jenseits der vier Raender ein leeres Vollbild auf (riesiges PNG ohne ein sichtbares Pixel).
+    if (b[2] < 0 || b[3] < 0 || b[0] > screenW - 1 || b[1] > screenH - 1) continue;
     x0 = Math.min(x0, b[0]); y0 = Math.min(y0, b[1]);
     x1 = Math.max(x1, b[2]); y1 = Math.max(y1, b[3]);
   }
   x0 = Math.max(0, Math.floor(x0)); y0 = Math.max(0, Math.floor(y0));
   x1 = Math.min(screenW - 1, Math.ceil(x1)); y1 = Math.min(screenH - 1, Math.ceil(y1));
   const w = x1 - x0 + 1, h = y1 - y0 + 1;
-  if (w <= 0 || h <= 0) return null;
+  if (!(w > 0) || !(h > 0)) return null;
 
-  const canvas = document.createElement('canvas');
-  canvas.width = w; canvas.height = h;
-  const ctx = canvas.getContext('2d');
-  const img = ctx.createImageData(w, h);
-  const d = img.data;
-  const useBg = bgPixels && bgPixels.width === screenW && bgPixels.height === screenH;
+  const d = new Uint8ClampedArray(w * h * 4);
+  const useBg = Boolean(bgPixels && bgPixels.width === screenW && bgPixels.height === screenH);
   const bg = useBg ? bgPixels.data : null;
   // Die Cvar-Farbe ist sRGB und wird vom Spiel vor dem Mischen linearisiert (Fall 17/18).
   // Mit Hintergrund rechnen wir komplett in linearem Licht, sonst bleibt alles sRGB.
   const lin = (v) => S2L[Math.round(clamp(v, 0, 1) * 255)];
   if (useBg) shapes = shapes.map((sh) => ({ ...sh, fill: [lin(sh.fill[0]), lin(sh.fill[1]), lin(sh.fill[2]), sh.fill[3]], outline: [lin(sh.outline[0]), lin(sh.outline[1]), lin(sh.outline[2]), sh.outline[3]] }));
+  const hole2 = shapes.map((sh) => { const r = holeRadius(sh); return r > 0 ? r * r : -1; });
+
   const px = [0, 0, 0, 0];
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const sx = x0 + x, sy = y0 + y;
-      shadePixel(shapes, sx, sy, px);
+  const row = [];   // Indizes der Shapes, deren Box die aktuelle Zeile schneidet
+  const cand = [];  // Shapes, die fuer das aktuelle Pixel in Frage kommen
+  for (let sy = y0; sy <= y1; sy++) {
+    row.length = 0;
+    let rx0 = Infinity, rx1 = -Infinity;
+    for (let i = 0; i < n; i++) {
+      const b = bounds[i];
+      if (sy < b[1] || sy > b[3]) continue;
+      row.push(i);
+      if (b[0] < rx0) rx0 = b[0];
+      if (b[2] > rx1) rx1 = b[2];
+    }
+    if (row.length === 0) continue;
+    const xa = Math.max(x0, Math.floor(rx0)), xb = Math.min(x1, Math.ceil(rx1));
+    for (let sx = xa; sx <= xb; sx++) {
+      cand.length = 0;
+      for (let k = 0; k < row.length; k++) {
+        const i = row[k];
+        const b = bounds[i];
+        if (sx < b[0] || sx > b[2]) continue;
+        if (hole2[i] > 0) {
+          const dx = sx - shapes[i].a[0], dy = sy - shapes[i].a[1];
+          if (dx * dx + dy * dy < hole2[i]) continue;
+        }
+        cand.push(shapes[i]);
+      }
+      if (cand.length === 0) continue;
+      shadePixel(cand, sx, sy, px);
       const a = px[3];
       if (a <= 0) continue;
-      const i = (y * w + x) * 4;
+      const i = ((sy - y0) * w + (sx - x0)) * 4;
       if (useBg) {
         const j = (sy * screenW + sx) * 4;
         d[i]     = l2s(px[0] * a + S2L[bg[j]]     * (1 - a));
@@ -410,8 +455,17 @@ export function rasterize(shapes, screenW = SCREEN_W, screenH = SCREEN_H, bgPixe
       }
     }
   }
-  ctx.putImageData(img, 0, 0);
-  return { canvas, x: x0, y: y0, w, h };
+  return { data: d, x: x0, y: y0, w, h };
+}
+
+// Wie rasterizePixels, aber als Canvas: { canvas, x, y, w, h } in Bildschirmpixeln.
+export function rasterize(shapes, screenW = SCREEN_W, screenH = SCREEN_H, bgPixels = null) {
+  const r = rasterizePixels(shapes, screenW, screenH, bgPixels);
+  if (!r) return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = r.w; canvas.height = r.h;
+  canvas.getContext('2d').putImageData(new ImageData(r.data, r.w, r.h), 0, 0);
+  return { canvas, x: r.x, y: r.y, w: r.w, h: r.h };
 }
 
 // ---------------------------------------------------------------------------
@@ -420,25 +474,58 @@ export function rasterize(shapes, screenW = SCREEN_W, screenH = SCREEN_H, bgPixe
 
 function clearChildren(el) { while (el.firstChild) el.removeChild(el.firstChild); }
 
+// Pro SVG: laufende Nummer des letzten Render-Auftrags und des angezeigten Bildes.
+const renderState = new WeakMap();
+function stateOf(svg) {
+  let st = renderState.get(svg);
+  if (!st) { st = { seq: 0, shown: 0, hasImage: false }; renderState.set(svg, st); }
+  return st;
+}
+
+// Das Bild wird als PNG-<image> ins SVG gelegt; der Browser dekodiert es asynchron. Wuerde das
+// alte Bild sofort entfernt, bliebe die Vorschau bis zum Dekodieren leer — bei jedem Bild der
+// Dynamic Preview aufs Neue, bei grossen (extremen) Crosshairs entsprechend laenger. Deshalb
+// bleibt das alte Bild stehen, bis das neue fertig dekodiert ist, und wird dann in einem
+// Schritt ersetzt. Ueberholte Auftraege (ein neueres Bild wird schon angezeigt) entfallen.
+function present(svg, st, seq, img) {
+  const show = () => {
+    if (seq <= st.shown) return;
+    st.shown = seq;
+    st.hasImage = true;
+    clearChildren(svg);
+    svg.appendChild(img);
+  };
+  // Erstes Bild sofort (nichts zu ersetzen); sonst erst nach dem Dekodieren tauschen.
+  if (!st.hasImage || typeof img.decode !== 'function') { show(); return; }
+  img.decode().then(show, show);
+}
+
 export function renderCrosshair(svg, params, opts = {}) {
-  clearChildren(svg);
+  const st = stateOf(svg);
+  const seq = ++st.seq;
+  // Leert die Vorschau und verwirft alle aelteren, noch nicht dekodierten Bilder. Der eigene
+  // Auftrag bleibt gueltig (seq - 1, nicht seq): sonst bliebe die Vorschau nach einem Zoom- oder
+  // Aufloesungswechsel und beim allerersten Rendern leer.
+  const clear = () => { st.shown = seq - 1; st.hasImage = false; clearChildren(svg); };
   const settings = getSettings();
   const res = getResolution();
   const W = res.w, H = res.h;
   const zoom = (Number.isFinite(opts.zoom) && opts.zoom > 0) ? opts.zoom : settings.zoom;
   const vbW = W / zoom, vbH = H / zoom;
-  svg.setAttribute('viewBox', `${W / 2 - vbW / 2} ${H / 2 - vbH / 2} ${vbW} ${vbH}`);
+  const viewBox = `${W / 2 - vbW / 2} ${H / 2 - vbH / 2} ${vbW} ${vbH}`;
+  // Aendert sich der Ausschnitt (Zoom/Aufloesung), passt das alte Bild nicht mehr dazu.
+  if (svg.getAttribute('viewBox') !== viewBox) { clear(); svg.setAttribute('viewBox', viewBox); }
   svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
   // Grosse Vorschau-Container folgen dem Seitenverhaeltnis der simulierten Aufloesung.
   const host = svg.parentElement;
   if (host && host.classList.contains('preview')) host.style.aspectRatio = `${W} / ${H}`;
-  if (!params) return;
+  if (!params) { clear(); return; }
 
   const spreadPx = Number.isFinite(opts.spreadPx) ? opts.spreadPx : settings.spreadPx;
   const kick = Number.isFinite(opts.kick) ? opts.kick : (settings.kick || 0);
   const shapes = buildShapes(params, H, W, { spreadPx, kick });
   const r = rasterize(shapes, W, H, getBgPixels(host, W, H));
-  if (!r) return;
+  if (!r) { clear(); return; }
   const img = document.createElementNS(SVG_NS, 'image');
   img.setAttribute('x', r.x);
   img.setAttribute('y', r.y);
@@ -446,7 +533,7 @@ export function renderCrosshair(svg, params, opts = {}) {
   img.setAttribute('height', r.h);
   img.setAttribute('href', r.canvas.toDataURL('image/png'));
   img.setAttribute('style', 'image-rendering: pixelated; image-rendering: crisp-edges;');
-  svg.appendChild(img);
+  present(svg, st, seq, img);
 }
 
 export function ensureSvg(host) {
@@ -461,8 +548,16 @@ export function ensureSvg(host) {
 const registered = new Set();
 export function registerForRerender(svg, getParams) { registered.add({ svg, getParams }); }
 
+// Waehrend der Dynamic Preview (30 Bilder/s) nur sichtbare Vorschauen neu rechnen; versteckte
+// (Restore-/Submission-Modal, anderer Tab) werden beim Oeffnen ohnehin frisch gerendert und
+// nach dem Stopp der Animation einmal mit dem Endzustand.
+function isVisible(svg) {
+  return svg.isConnected && svg.getClientRects().length > 0;
+}
 function rerenderAll() {
+  const animating = isDynamicPreview();
   for (const entry of registered) {
+    if (animating && !isVisible(entry.svg)) continue;
     try { renderCrosshair(entry.svg, entry.getParams()); } catch (_e) { /* ignore */ }
   }
 }
