@@ -174,3 +174,25 @@ test('readState normalizes params of already-new entries (missing keys -> defaul
   assert.equal('junk' in s.presets[0].params, false);
   assert.equal(s.presets[0].migrated, undefined);
 });
+
+test('entries from before 2026-09-30 (no outline cvars) keep their look: black outline with crosshair alpha', () => {
+  const dir = freshDataDir();
+  const pre = { ...GREEN_RESTORE_PARAMS, cl_crosshair_drawoutline: 1, cl_crosshaircolor_a: 120 };
+  for (const k of Object.keys(pre)) if (k.startsWith('cl_crosshairoutline_') || k.startsWith('cl_ironsight_')) delete pre[k];
+  fs.writeFileSync(path.join(dir, 'presets.json'), JSON.stringify({
+    presets: [{ id: 'p', name: 'Vor dem Update', params: pre }],
+    restore: { params: { ...GREEN_RESTORE_PARAMS } },
+    keys: { next: 'f7', restore: 'f8' },
+  }));
+  fs.writeFileSync(path.join(dir, 'submissions.json'), JSON.stringify({ submissions: [{ id: 's', params: pre }] }));
+  const p = state.readState().presets[0].params;
+  assert.deepEqual(Object.keys(p).sort(), [...CVAR_KEYS].sort());
+  assert.equal(p.cl_crosshairoutline_a, 120);
+  assert.deepEqual([p.cl_crosshairoutline_r, p.cl_crosshairoutline_g, p.cl_crosshairoutline_b], [0, 0, 0]);
+  assert.equal(p.cl_ironsight_usecrosshaircolor, 0);
+  assert.equal(p.cl_ironsight_dot_scale, 1);
+  assert.equal(state.readSubmissions().submissions[0].params.cl_crosshairoutline_a, 120);
+  // Eintraege, die die Outline-Cvars schon haben, bleiben unangetastet
+  const kept = state.readState().restore.params;
+  assert.equal(kept.cl_crosshairoutline_a, 255);
+});

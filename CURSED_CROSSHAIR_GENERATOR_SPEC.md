@@ -115,13 +115,13 @@ Two JSON files in `/data/`, each written atomically.
 
 `status`: `pending` | `approved` | `rejected`.
 
-**Param schema** (used in both files, identical for presets, submissions AND restore — CS2 crosshair system since the game update of 2026-09-22, pixel units; single source of truth: `public/js/cvars.js`):
+**Param schema** (used in both files, identical for presets, submissions AND restore — CS2 crosshair system since the game update of 2026-09-22, pixel units, extended by the game update of 2026-09-30 (build 2000922): outline colour, Static Quadrant, thickness 32, signed gap, scope dot; single source of truth: `public/js/cvars.js`):
 ```js
 {
-  cl_crosshairstyle: 0..8,                         // enum (4 = Static Cross, 0 = Dynamic Cross, ...)
+  cl_crosshairstyle: 0..9,                         // enum (4 = Static Cross, 0 = Dynamic Cross, 9 = Static Quadrant, ...)
   cl_crosshair_length: 0..255,                     // int, pixels at screen_height
-  cl_crosshair_thickness: 0..31,                   // int, pixels
-  cl_crosshair_gap: 0..128,                        // int, pixels (no negative gaps any more)
+  cl_crosshair_thickness: 0..32,                   // int, pixels
+  cl_crosshair_gap: -3840..3840,                   // int, pixels; negative only has an effect in style 2 (Classic)
   cl_crosshairdot: 0|1,
   cl_crosshair_t: 0|1,
   cl_crosshair_recoil: 0|1,
@@ -130,18 +130,26 @@ Two JSON files in `/data/`, each written atomically.
   cl_crosshaircolor_g: 0..255,
   cl_crosshaircolor_b: 0..255,
   cl_crosshaircolor_a: 0..255,
+  cl_crosshairoutline_r: 0..255,                   // outline colour (since 2026-09-30), only used if drawoutline != 0
+  cl_crosshairoutline_g: 0..255,
+  cl_crosshairoutline_b: 0..255,
+  cl_crosshairoutline_a: 0..255,
   cl_crosshair_dynamic_spread_limit: 0..255,
   cl_crosshair_dynamic_splitdist: 0..127,
-  cl_crosshair_dynamic_splitalpha_innermod: 0..1,    // float, step 0.05
-  cl_crosshair_dynamic_splitalpha_outermod: 0.3..1,  // float, step 0.05
-  cl_crosshair_dynamic_maxdist_splitratio: 0..1,     // float, step 0.01
-  cl_crosshair_screen_height: 240..65535             // int, reference height for the pixel values
+  cl_crosshair_dynamic_splitalpha_innermod: 0..1,    // float, step 0.01 (0.05 before 2026-09-30)
+  cl_crosshair_dynamic_splitalpha_outermod: 0.3..1,  // float, step 0.01
+  cl_crosshair_dynamic_maxdist_splitratio: 0..1,     // float, step 0.01; "Split ratio" (style 2) and "Quadrant size" (style 9)
+  cl_ironsight_usecrosshaircolor: 0|1,               // scope dot (AUG / SG 553), part of the crosshair settings + share code since 2026-09-30
+  cl_ironsight_dot_scale: 0.1..2,                    // float, step 0.01
+  cl_crosshair_screen_height: 240..65535             // int, reference height for the pixel values (always last)
 }
 ```
 
-All 18 keys are always present after validation; missing keys get the cvar default. There are no restore-only extra fields any more. The old cvars (`cl_crosshairsize`, `cl_crosshairthickness`, `cl_crosshairgap`, `cl_crosshair_outlinethickness`, `cl_crosshairusealpha`, `cl_crosshairalpha`, `cl_crosshaircolor`, `cl_crosshairgap_useweaponvalue`, `cl_fixedcrosshairgap`) were removed by the game.
+All 24 keys are always present after validation; missing keys get the cvar default. There are no restore-only extra fields any more. The old cvars (`cl_crosshairsize`, `cl_crosshairthickness`, `cl_crosshairgap`, `cl_crosshair_outlinethickness`, `cl_crosshairusealpha`, `cl_crosshairalpha`, `cl_crosshaircolor`, `cl_crosshairgap_useweaponvalue`, `cl_fixedcrosshairgap`) were removed by the game.
 
 **Automatic migration:** on the first `readState()` / `readSubmissions()` after the update, every entry whose params still use the old cvar set (`isLegacyParams`) is converted with `migrateLegacyParams(params, { screenHeight: 960 })` (`public/js/migrate.js`; 960 = the resolution the old presets were designed on). Before the file is rewritten it is copied to `<file>.pre-cs2-update-<YYYYMMDD>.bak` (only if that backup does not exist yet). Migrated entries get `"migrated": true` as a marker for the admin UI; the flag is dropped when the entry is saved again from the admin UI without it. The migration is idempotent. Independently of that, all params are passed through `normalizeParams` on every read.
+
+**Entries from before the 2026-09-30 update** (new cvar set, but no `cl_crosshairoutline_*` keys) get a black outline with the crosshair's own alpha on read (`fillMissingOutline` in `cvars.js`): that is how the game drew the outline until then and exactly what the client does when it imports an old share code. The scope-dot cvars default to the game defaults (off / 1.0). No backup or marker is needed for this; the values are written the next time the entry is saved.
 
 **First-run seed:** create `presets.json` with one starter preset and the green restore (Section 8, `lib/defaults.js`). Create empty `submissions.json` with `{ "submissions": [] }`.
 
@@ -191,22 +199,25 @@ Three-column layout on desktop, stacks on mobile.
 **Center column — live preview:**
 - Big preview canvas (SVG, ~500 px wide, 4:3), map-screenshot background, renders the currently selected preset.
 - Re-render on every parameter change.
-- **Renderer (`public/js/preview.js`)** — not an approximation any more: a port of the game's crosshair pixel shader (`csgo_crosshair.slang`, reconstructed from SPIR-V) plus the geometry code of the client (`csgo_crosshair.cpp`: cvars → up to 16 shapes — rects, ring, quad arc segments — with fill and outline colour). Rendered per canvas in real game pixels (simulated resolution, default 1920×1080; values scaled with `current_height / cl_crosshair_screen_height` like the game) and embedded as `<image>` into the SVG, whose viewBox is 1 unit = 1 game pixel. Blending happens in linear light on the map background (`SRC_ALPHA / ONE_MINUS_SRC_ALPHA`, sRGB framebuffer), as the game does. Verified pixel by pixel against in-game screenshots (`tools/calib-*.mjs` / `calib-compare.py`, see `tools/README.md`).
+- **Renderer (`public/js/preview.js`)** — not an approximation any more: a port of the game's crosshair pixel shader (`csgo_crosshair.slang`, reconstructed from SPIR-V) plus the geometry code of the client (cvars → up to 64 shapes — rects, ring, quad arc segments — with fill and outline colour; formulas taken from the decompiled client of build 2000922, 2026-09-30). Rendered per canvas in real game pixels (simulated resolution, default 1920×1080; values scaled with `current_height / cl_crosshair_screen_height` like the game) and embedded as `<image>` into the SVG, whose viewBox is 1 unit = 1 game pixel. Blending happens in linear light on the map background (`SRC_ALPHA / ONE_MINUS_SRC_ALPHA`, sRGB framebuffer), as the game does. Verified pixel by pixel against in-game screenshots (`tools/calib-*.mjs` / `calib-compare.py`, see `tools/README.md`).
 - Preview controls (shared by public + admin, persisted in localStorage): **Background** (map), **Resolution** (simulated game resolution, default 1920×1080 — the values scale like in the game), **Zoom** (viewBox crop only, `Original` = whole render surface), **Spread** slider + **Dynamic Preview** animation for the dynamic styles. The spread default is 7 px (`SPREAD_REST` in `preview-settings.js`: standing still with a rifle, measured in-game with an AK-47 at 1080p — the Dynamic Quad/Circle ring only exists for spread > 0, so 0 would show the knife state); the animation rests at the same value. Stored under `ccg.preview.spread.v2` (key bumped 2026-09-29 so an old stored 0 no longer overrides the default). No display-aspect / stretch settings.
 
 **Right column — editor:** all fields with both slider AND number input where a range makes sense; ranges always come from `CVARS` in `public/js/cvars.js` (the game clamps hard to them — "cursed" now means extreme values inside these limits); live-syncs to preview.
 - Name (text)
-- **Style** (`cl_crosshairstyle`, dropdown with the 9 styles in the CS2 settings order: Static Cross 4, Static Circle 3, Static Square 8, Dot Only 6, Dynamic Cross 0, Dynamic Circle 1, Dynamic Cross (Classic) 2, Dynamic Cross (Legacy/Shot Feedback) 5, Dynamic Quad 7) with an info popover describing each style
+- **Style** (`cl_crosshairstyle`, dropdown with the 10 styles in the CS2 settings order: Static Cross 4, Static Circle 3, Static Square 8, Dot Only 6, Static Quadrant 9, Dynamic Cross 0, Dynamic Circle 1, Dynamic Cross (Classic) 2, Dynamic Cross (Legacy/Shot Feedback) 5, Dynamic Quadrant 7) with an info popover describing each style
 - **Length** `cl_crosshair_length` (integer pixels, 0–255)
-- **Thickness** `cl_crosshair_thickness` (integer pixels, 0–31)
-- **Gap** `cl_crosshair_gap` (integer pixels, 0–128 — no negative gaps any more)
+- **Thickness** `cl_crosshair_thickness` (integer pixels, 0–32)
+- **Gap** `cl_crosshair_gap` (integer pixels; number input takes the full cvar range −3840…3840, the slider covers −128…512). The game draws a negative gap like 0 (cross, square) or 1 (circle, Static Quadrant) in every style except Classic (2), where it is an offset on the spread distance; the preview does the same.
 - **Center Dot** `cl_crosshairdot`, **T-Style** `cl_crosshair_t`, **Follow Recoil** `cl_crosshair_recoil` (toggles)
 - **Outline** `cl_crosshair_drawoutline` (segmented: None 0 / Full 1 / Half 2)
+- **Outline color** RGB picker + 3 number inputs `cl_crosshairoutline_r/g/b` and **Outline alpha** `cl_crosshairoutline_a` (greyed out while Outline is None, like in the game menu)
 - **Color** RGB picker + 3 number inputs `cl_crosshaircolor_r/g/b` (0–255) and **Alpha** `cl_crosshaircolor_a` (0–255 slider; always applied, there is no use-alpha switch any more)
 - Collapsible **Dynamic** group: `cl_crosshair_dynamic_spread_limit` (0–255)
-- Collapsible **Classic split (Style 2)** group: `cl_crosshair_dynamic_splitdist` (0–127), `cl_crosshair_dynamic_splitalpha_innermod` (0–1, step 0.05), `cl_crosshair_dynamic_splitalpha_outermod` (0.3–1, step 0.05), `cl_crosshair_dynamic_maxdist_splitratio` (0–1, step 0.01)
+- Collapsible **Classic split (Style 2)** group: `cl_crosshair_dynamic_splitdist` (0–127), `cl_crosshair_dynamic_splitalpha_innermod` (0–1, step 0.01), `cl_crosshair_dynamic_splitalpha_outermod` (0.3–1, step 0.01)
+- **Split ratio / Quadrant size** `cl_crosshair_dynamic_maxdist_splitratio` (0–1, step 0.01) as its own field: one cvar with two roles (Classic split ratio, Static Quadrant arc width — 1 = closed ring)
+- Collapsible **Scope dot** group: `cl_ironsight_usecrosshaircolor` (toggle), `cl_ironsight_dot_scale` (0.1–2, step 0.01). Exported and part of the share code, not drawn in the preview (only visible when scoped)
 - `cl_crosshair_screen_height` is not exposed in the editor (removed 2026-09-26 on request); presets keep the value from their import code or the default 1080, the export always writes it last.
-- **Style-dependent greying:** fields that have no effect for the selected style (`isRelevant(key, style)` — same visibility table as the game's settings menu, e.g. Length/Gap/T-Style for Dot Only, Classic split only for style 2, Spread limit only for styles 0/1/7) are shown disabled; their values stay in the params and are still exported.
+- **Style-dependent greying:** fields that have no effect for the selected style (`isRelevant(key, style, params)` — same visibility table as the game's settings menu, e.g. Length/Gap/T-Style for Dot Only, Classic split only for style 2, Spread limit only for styles 0/1/7, Split ratio / Quadrant size only for styles 2/9, outline colour only with an outline) are shown disabled; their values stay in the params and are still exported.
 
 **Top bar buttons:**
 - "Edit Restore Crosshair" (modal with same editor for the green default; pre-filled with my green crosshair on first run — see below)
@@ -219,11 +230,12 @@ Three-column layout on desktop, stacks on mobile.
 - `cl_crosshairdot 0`, `cl_crosshair_t 0`, `cl_crosshair_recoil 0`
 - `cl_crosshair_drawoutline 0`
 - RGB `0 / 255 / 91`, `cl_crosshaircolor_a 255`
+- outline `0 / 0 / 0`, `cl_crosshairoutline_a 255`; `cl_ironsight_usecrosshaircolor 0`, `cl_ironsight_dot_scale 1`
 - `cl_crosshair_dynamic_spread_limit 255`
 - `cl_crosshair_dynamic_splitdist 3`, `cl_crosshair_dynamic_splitalpha_innermod 0`, `cl_crosshair_dynamic_splitalpha_outermod 1`, `cl_crosshair_dynamic_maxdist_splitratio 1`
 - `cl_crosshair_screen_height 960`
 
-The starter preset for a fresh `presets.json` is `STARTER_PRESET_PARAMS` in the same file (Dynamic Quad, length 40, thickness 6, gap 2, dot, recoil, full outline, RGB 255/0/200 alpha 220, screen height 1080).
+The starter preset for a fresh `presets.json` is `STARTER_PRESET_PARAMS` in the same file (Dynamic Quadrant, length 40, thickness 6, gap 2, dot, recoil, full outline in black with alpha 220, RGB 255/0/200 alpha 220, scope dot defaults, screen height 1080).
 
 ---
 
@@ -283,13 +295,13 @@ Apply on submission AND admin edits (presets, submissions and restore share the 
 
 ## 11. `.cfg` Export Format — EXACT Structure Required
 
-Source console has a per-alias string length limit, so each preset MUST be split into 3 chained aliases `_cN / _cNb / _cNc`. Since the CS2 crosshair update of 2026-09-22 all 18 cvars are always written; `cl_crosshair_screen_height` is a hidden cvar that the game overwrites on every length/thickness/gap change and therefore MUST be the last cvar of each chain. The client cfg parser is built on exactly this layout. The output structure is non-negotiable:
+Source console has a per-alias string length limit, so each preset MUST be split into 3 chained aliases `_cN / _cNb / _cNc`. Since the CS2 crosshair update of 2026-09-22 all cvars of the schema are always written (24 as of the 2026-09-30 update); `cl_crosshair_screen_height` is a hidden cvar that the game overwrites on every length/thickness/gap change and therefore MUST be the last cvar of each chain. The client cfg parser is built on exactly this layout. The output structure is non-negotiable:
 
 ```
 // =======================================================
 //            CURSED CROSSHAIR CONFIG
 //            <N> PRESETS
-//            CS2 Crosshair-System seit 2026-09-22 (Pixel-Einheiten)
+//            CS2 Crosshair-System seit 2026-09-22 (Pixel-Einheiten), Stand 2026-09-30
 // =======================================================
 
 echo " "
@@ -302,8 +314,8 @@ alias _setup_keys "unbind <next>; bind <next> cursed_next; unbind <restore>; bin
 
 // --- PRESETS ---
 // For each preset N (1-indexed):
-//   alias _cN  "cl_crosshairstyle S; cl_crosshair_length L; cl_crosshair_thickness T; cl_crosshair_gap G; cl_crosshairdot D; cl_crosshair_t X; cl_crosshair_recoil R; _cNb"
-//   alias _cNb "cl_crosshair_drawoutline O; cl_crosshaircolor_r R; cl_crosshaircolor_g G; cl_crosshaircolor_b B; cl_crosshaircolor_a A; cl_crosshair_dynamic_spread_limit P; _cNc"
+//   alias _cN  "cl_crosshairstyle S; cl_crosshair_length L; cl_crosshair_thickness T; cl_crosshair_gap G; cl_crosshairdot D; cl_crosshair_t X; cl_crosshair_recoil R; cl_ironsight_usecrosshaircolor U; cl_ironsight_dot_scale Z; _cNb"
+//   alias _cNb "cl_crosshair_drawoutline O; cl_crosshaircolor_r R; cl_crosshaircolor_g G; cl_crosshaircolor_b B; cl_crosshaircolor_a A; cl_crosshairoutline_r R; cl_crosshairoutline_g G; cl_crosshairoutline_b B; cl_crosshairoutline_a A; cl_crosshair_dynamic_spread_limit P; _cNc"
 //   alias _cNc "cl_crosshair_dynamic_splitdist S; cl_crosshair_dynamic_splitalpha_innermod I; cl_crosshair_dynamic_splitalpha_outermod O; cl_crosshair_dynamic_maxdist_splitratio R; cl_crosshair_screen_height H; echo [CURSED #N] <NAME>[ (by <submittedBy>)]"
 
 // --- ROTATION ---
@@ -312,8 +324,8 @@ alias _setup_keys "unbind <next>; bind <next> cursed_next; unbind <restore>; bin
 // alias cursed_next _link1
 
 // --- RESTORE (same layout as a preset, aliases cursed_restore / _rb / _rc) ---
-// alias cursed_restore "cl_crosshairstyle S; cl_crosshair_length L; cl_crosshair_thickness T; cl_crosshair_gap G; cl_crosshairdot D; cl_crosshair_t X; cl_crosshair_recoil R; _rb"
-// alias _rb "cl_crosshair_drawoutline O; cl_crosshaircolor_r R; cl_crosshaircolor_g G; cl_crosshaircolor_b B; cl_crosshaircolor_a A; cl_crosshair_dynamic_spread_limit P; _rc"
+// alias cursed_restore "cl_crosshairstyle S; cl_crosshair_length L; cl_crosshair_thickness T; cl_crosshair_gap G; cl_crosshairdot D; cl_crosshair_t X; cl_crosshair_recoil R; cl_ironsight_usecrosshaircolor U; cl_ironsight_dot_scale Z; _rb"
+// alias _rb "cl_crosshair_drawoutline O; cl_crosshaircolor_r R; cl_crosshaircolor_g G; cl_crosshaircolor_b B; cl_crosshaircolor_a A; cl_crosshairoutline_r R; cl_crosshairoutline_g G; cl_crosshairoutline_b B; cl_crosshairoutline_a A; cl_crosshair_dynamic_spread_limit P; _rc"
 // alias _rc "cl_crosshair_dynamic_splitdist S; cl_crosshair_dynamic_splitalpha_innermod I; cl_crosshair_dynamic_splitalpha_outermod O; cl_crosshair_dynamic_maxdist_splitratio R; cl_crosshair_screen_height H; echo [NORMAL] Gruenes Crosshair zurueck"
 
 // --- APPLY KEY BINDS ---

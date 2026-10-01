@@ -12,7 +12,7 @@ Deployed via Docker on Unraid (or any Docker host) and exposed publicly through 
 - **Admin dashboard** — tabbed interface (Presets / Submissions), full editor, restore-crosshair editor, key-binding editor, one-click `.cfg` export.
 - **Approval workflow** — review, edit, and approve user submissions. Approved presets get a `(by <name>)` echo line in the exported cfg.
 - **Atomic JSON storage** — `presets.json` and `submissions.json` in a mounted Docker volume (`/data`).
-- **CS2 crosshair system since 2026-09-22** — 18 pixel-based cvars (`cl_crosshair_length/thickness/gap`, `cl_crosshair_screen_height`, ...), all 9 styles, Full/Half outline; share code import/export. Data written with the old cvar set is migrated automatically on first read (backup kept next to the file, see below).
+- **CS2 crosshair system since 2026-09-22, updated for the game update of 2026-09-30** — 24 cvars (`cl_crosshair_length/thickness/gap`, outline colour `cl_crosshairoutline_r/g/b/a`, scope dot, `cl_crosshair_screen_height`, ...), all 10 styles including Static Quadrant, Full/Half outline, thickness up to 32, signed gap. Share code import/export in the new game format (`CS` + 44 characters); older `CSGO-…` codes can still be imported. Data written with the old cvar set is migrated automatically on first read (backup kept next to the file, see below).
 - **Single-admin auth** — env-var based (`ADMIN_USER`, `ADMIN_PASSWORD`). Auto-generates a random password on first run if none is set.
 - **Real-IP rate limiting** — `CF-Connecting-IP` header is honored. 5 logins / 15 min, 10 submissions / hour per IP.
 - **Cloudflare Tunnel ready** — `trust proxy` enabled, secure cookies, plain HTTP on port 3000.
@@ -152,12 +152,12 @@ If you skip this step, the app will log `[WARN] Turnstile keys not configured �
 
 ## How the exported `.cfg` works
 
-Since the CS2 crosshair update of 2026-09-22 the game uses pixel-based cvars (18 in total, see `public/js/cvars.js`). All 18 are always written. `cl_crosshair_screen_height` is a hidden cvar that the game overwrites whenever length/thickness/gap change, so it is always the **last** cvar in each chain.
+Since the CS2 crosshair update of 2026-09-22 the game uses pixel-based cvars (24 in this tool's schema as of the 2026-09-30 update, see `public/js/cvars.js`). All of them are always written. `cl_crosshair_screen_height` is a hidden cvar that the game overwrites whenever length/thickness/gap change, so it is always the **last** cvar in each chain.
 
 The exporter splits each preset into **three chained aliases** (`_cN`, `_cNb`, `_cNc`) because the source-engine console has a per-alias string-length limit. Each preset:
 
-- `_cN` — `cl_crosshairstyle`, `cl_crosshair_length`, `cl_crosshair_thickness`, `cl_crosshair_gap`, `cl_crosshairdot`, `cl_crosshair_t`, `cl_crosshair_recoil`; chains to `_cNb`.
-- `_cNb` — `cl_crosshair_drawoutline`, `cl_crosshaircolor_r/g/b/a`, `cl_crosshair_dynamic_spread_limit`; chains to `_cNc`.
+- `_cN` — `cl_crosshairstyle`, `cl_crosshair_length`, `cl_crosshair_thickness`, `cl_crosshair_gap`, `cl_crosshairdot`, `cl_crosshair_t`, `cl_crosshair_recoil`, `cl_ironsight_usecrosshaircolor`, `cl_ironsight_dot_scale`; chains to `_cNb`.
+- `_cNb` — `cl_crosshair_drawoutline`, `cl_crosshaircolor_r/g/b/a`, `cl_crosshairoutline_r/g/b/a`, `cl_crosshair_dynamic_spread_limit`; chains to `_cNc`.
 - `_cNc` — `cl_crosshair_dynamic_splitdist`, `..._splitalpha_innermod`, `..._splitalpha_outermod`, `..._maxdist_splitratio`, `cl_crosshair_screen_height`, then `echo [CURSED #N] <name> (by <submitter>)`.
 
 Numbers are written as integers where possible; floats use at most two decimals.
@@ -179,6 +179,8 @@ Re-`exec`'ing the cfg in CS2 is safe: every key bind is preceded by `unbind`, so
 ## Migration of pre-2026-09-22 data
 
 On the first read after the update, any preset, restore or submission still stored with the old cvar set (`cl_crosshairsize`, `cl_crosshairgap`, `cl_crosshairusealpha`, ...) is converted with `migrateLegacyParams()` (`public/js/migrate.js`) at a reference height of 960 px (the resolution the old presets were designed on). Before writing, the original file is copied to `presets.json.pre-cs2-update-<YYYYMMDD>.bak` (resp. `submissions.json.pre-cs2-update-<YYYYMMDD>.bak`) in the data directory; an existing backup is never overwritten. Migrated entries carry `"migrated": true` until they are saved again from the admin UI. The migration is idempotent.
+
+Entries saved between 2026-09-22 and the game update of 2026-09-30 have no outline colour. On read they get a black outline with the crosshair's own alpha (how the game drew it until then, and what the game itself does when it imports an older share code); the scope-dot values default to off / 1.0.
 
 ---
 

@@ -5,7 +5,7 @@
 // =======================
 //
 // Generates CS2 cfgs with the current presets bound to F1-F8 (CS2 crosshair
-// system since the 2026-09-22 update: 18 pixel-based cvars, see
+// system since the 2026-09-22 update, 24 cvars as of the 2026-09-30 update, see
 // public/js/cvars.js), then watches the CS2 screenshots folder and produces a
 // compare HTML page (app preview vs in-game screenshot, side by side).
 //
@@ -32,17 +32,18 @@
 // (real render buffer) or as PNG at native resolution and compare 1:1.
 //
 // Pixel-exact comparison (numeric, not by eye) lives in three separate tools:
-//   1. node tools/calib-codes.mjs          -> data/calibration-v2/codes.{md,json}
-//      Generates the calibration share codes (fixed test cases, magenta,
-//      1920x1080; two extra cases for 1280x960 scaling).
+//   1. node tools/calib-codes.mjs          -> data/calibration-v3/codes.{md,json}
+//      Generates the calibration share codes (fixed test cases, magenta, 1920x1080).
+//      Default set v3 = features of the 2026-09-30 update (Static Quadrant, outline
+//      color, thickness 32, negative gap); `--set v2` = the original 16 cases.
 //   2. Import each code in CS2 (Settings -> Crosshair -> Share Code), stand
 //      still with the knife in front of the sky / a plain wall and take a PNG
-//      screenshot at native 1920x1080; save it as data/calibration-v2/shots/NN.png
+//      screenshot at native 1920x1080; save it as data/calibration-v3/shots/NN.png
 //      (NN = case number from codes.md, e.g. 01.png).
-//   3. node tools/calib-expected.mjs data/calibration-v2 [W H]
+//   3. node tools/calib-expected.mjs data/calibration-v3 [W H]
 //      Renders the expected pixels (buildShapes + shadePixel, premultiplied,
 //      linear light) around the screen centre -> expected/NN.f32 + meta.json.
-//   4. python3 tools/calib-compare.py data/calibration-v2 [outdir]
+//   4. python3 tools/calib-compare.py data/calibration-v3 [outdir]
 //      Composites expected over the background estimated from the crop edge
 //      (game blend model: SRC_ALPHA/ONE_MINUS_SRC_ALPHA in linear light on an
 //      sRGB framebuffer), counts missing/extra/wrong pixels, writes diff images
@@ -202,7 +203,7 @@ async function fetchAppState({ appUrl, adminUser, adminPass }) {
 // -------------------------------------------------------------------------
 // Cfg generation
 // -------------------------------------------------------------------------
-// Build a per-preset cfg body that sets all 18 crosshair cvars, one per line,
+// Build a per-preset cfg body that sets all crosshair cvars (CVAR_KEYS), one per line,
 // in CVAR_KEYS order. cl_crosshair_screen_height is the LAST key there on
 // purpose: the game overwrites it whenever length/thickness/gap change, so it
 // must be set after them (same rule as lib/cfg-export.js).

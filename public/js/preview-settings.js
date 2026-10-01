@@ -5,7 +5,7 @@
 //               aktuelleHoehe / cl_crosshair_screen_height (Rundung wie im Spiel),
 //               deshalb sieht dasselbe Preset bei 960p und 1080p unterschiedlich aus.
 //   spreadPx    Simulierter Waffen-Spread in Pixeln fuer die dynamischen Styles
-//               (Dynamic Cross/Circle/Quad). 0 = Messer; ein Gewehr hat auch im
+//               (Dynamic Cross/Circle/Quadrant, Classic). 0 = Messer; ein Gewehr hat auch im
 //               Stand einen Grundspread (AK-47 bei 1080p: 7 px, Screenshot-Messung
 //               2026-09-29, Quad-Ring Aussenradius 37 = 7 + 30), deshalb Default 7.
 
@@ -170,7 +170,7 @@ export function buildPreviewControls(extraSlot = null) {
 
   const spreadWrap = document.createElement('span');
   spreadWrap.className = 'preview-spread';
-  spreadWrap.title = `Simulated weapon spread in pixels for the dynamic styles (Dynamic Cross, Dynamic Circle, Dynamic Quad). ${SPREAD_REST} px = standing still with a rifle (AK-47, 1080p), 0 = knife.`;
+  spreadWrap.title = `Simulated weapon spread in pixels for the dynamic styles (Dynamic Cross, Dynamic Circle, Classic, Dynamic Quadrant). ${SPREAD_REST} px = standing still with a rifle (AK-47, 1080p), 0 = knife.`;
   const spread = document.createElement('input');
   spread.type = 'range'; spread.min = '0'; spread.max = String(SPREAD_MAX); spread.step = '1';
   spread.value = String(state.spreadPx);

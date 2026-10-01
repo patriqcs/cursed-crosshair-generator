@@ -5,7 +5,7 @@ Two ways to check the app's preview against the real game:
 1. **Visual side-by-side** — `tools/cs2-debug.js`: generate CS2 cfgs for the current presets, launch the game, capture screenshots, and open a compare page (app preview vs in-game screenshot).
 2. **Pixel-exact comparison** — `tools/calib-codes.mjs` → `tools/calib-expected.mjs` → `tools/calib-compare.py`: fixed calibration cases, imported as share codes, compared pixel by pixel against PNG screenshots (see [Pixel-exact comparison](#pixel-exact-comparison)).
 
-Both work on the CS2 crosshair system since the 2026-09-22 update (18 pixel-based cvars, `public/js/cvars.js`). Everything under `data/` (screenshots, cfg state, calibration results) is git-ignored.
+Both work on the CS2 crosshair system since the 2026-09-22 update, as extended by the game update of 2026-09-30 (24 cvars, `public/js/cvars.js`). Everything under `data/` (screenshots, cfg state, calibration results) is git-ignored.
 
 **VAC-safe.** The tools only:
 - write `.cfg` files into your CS2 cfg folder
@@ -55,7 +55,7 @@ node tools/cs2-debug.js all
 | Command | What it does |
 |---|---|
 | `detect` | Print detected Steam / CS2 paths and exit. |
-| `prepare` | Write `cursed_debug.cfg` plus one cfg per preset (all 18 cvars, `cl_crosshair_screen_height` last) into CS2's cfg dir. Bind F1–F8 to presets 1–8, F11 to `screenshot`, F12 to restore. |
+| `prepare` | Write `cursed_debug.cfg` plus one cfg per preset (all cvars of the schema, `cl_crosshair_screen_height` last) into CS2's cfg dir. Bind F1–F8 to presets 1–8, F11 to `screenshot`, F12 to restore. |
 | `launch` | Start CS2 via `steam://rungameid/730` (uses Steam — Steam must be running). |
 | `watch` | Poll the CS2 screenshots dir, copy any new JPG/PNG/TGA into `data/debug/screenshots/`. Ctrl+C to stop. |
 | `compare` | Generate `data/debug/compare.html` and serve it on `http://127.0.0.1:3777/` (app preview vs in-game screenshot, side by side); opens it in your browser. Ctrl+C to stop. |
@@ -132,26 +132,30 @@ Screenshots are matched to slots in arrival order (the simplest heuristic). If y
 For a numeric check (missing / extra / wrongly coloured pixels) instead of eyeballing, use the three calibration tools. Python 3 with `numpy` and `Pillow` is needed for the last step.
 
 ```bash
-# 1) generate the calibration share codes (fixed test cases, magenta, Full Outline)
-node tools/calib-codes.mjs                      # -> data/calibration-v2/codes.md + codes.json
+# 1) generate the calibration share codes (fixed test cases, magenta)
+node tools/calib-codes.mjs                      # -> data/calibration-v3/codes.md + codes.json
+#    default set v3 = features of the 2026-09-30 game update (Static Quadrant, outline colour,
+#    thickness 32, negative gap). `--set v2` writes the original 16 cases to data/calibration-v2.
 
 # 2) in CS2: import each code (Settings -> Crosshair -> Share Code), take a screenshot,
-#    save as data/calibration-v2/shots/NN.png   (NN = case number from codes.md: 01.png, 02.png, ...)
+#    save as data/calibration-v3/shots/NN.png   (NN = case number from codes.md: 01.png, 02.png, ...)
 
 # 3) render the expected pixels for every 1080p case
-node tools/calib-expected.mjs data/calibration-v2     # -> data/calibration-v2/expected/NN.f32 + meta.json
+node tools/calib-expected.mjs data/calibration-v3     # -> data/calibration-v3/expected/NN.f32 + meta.json
 
 # 4) compare and write diff images + report
-python3 tools/calib-compare.py data/calibration-v2    # -> data/calibration-v2/diff/NN.png + report.json
+python3 tools/calib-compare.py data/calibration-v3    # -> data/calibration-v3/diff/NN.png + report.json
 ```
+
+The codes are written in the game's new share-code format (`CS` + 44 characters, since 2026-09-30). The screenshots of set v2 were taken on 2026-09-26 and still match the renderer pixel for pixel; set v3 has no screenshots yet — its geometry comes from the decompiled client only.
 
 Screenshot procedure for step 2:
 
-- Play at **1920×1080 native** (no stretching, no scaling). Two cases in `codes.md` are marked for 1280×960: import them at that resolution, then copy the share code back and take the shot with the console command `screenshot`.
+- Play at **1920×1080 native** (no stretching, no scaling). In set v2 two cases are marked for 1280×960: import them at that resolution, then copy the share code back and take the shot with the console command `screenshot`.
 - Save as **PNG**, not JPG — Win+PrtScn (Windows saves to `Pictures/Screenshots`) or Xbox Game Bar (Win+Alt+PrtScn) both produce lossless PNGs of the full screen.
 - Stand still, **knife** out (no weapon spread), and aim at the **sky or a plain, evenly lit wall** so the background around the centre is a smooth gradient — `calib-compare.py` estimates the background from the edge of the crop.
-- Cases that say "knife AND rifle" (Dynamic Quad / Dynamic Circle) want two shots; the comparison uses the knife one (spread 0).
-- File names are exactly `NN.png` (two digits) under `data/calibration-v2/shots/`.
+- Cases that say "knife AND rifle" (Dynamic Quadrant / Dynamic Circle) want two shots; the comparison uses the knife one (spread 0).
+- File names are exactly `NN.png` (two digits) under `data/calibration-v3/shots/` (resp. `-v2`).
 
 `calib-compare.py` composites the expected crosshair over the estimated background using the game's blend model (shader output premultiplied; `SRC_ALPHA / ONE_MINUS_SRC_ALPHA` in linear light on an sRGB framebuffer) and prints per case: expected pixels, pixels found, missing, extra, wrong colour, with the first few coordinates relative to the screen centre. Diff images are 4× magnified panels: screenshot | expected | differences (red = missing, yellow = extra, cyan = wrong colour).
 
@@ -167,4 +171,4 @@ This removes:
 - `cursed_debug*.cfg` files from CS2's cfg dir
 - The whole `data/debug/` directory
 
-The web app's main `data/presets.json` and `data/submissions.json` are untouched. `data/calibration-v2/` is left alone.
+The web app's main `data/presets.json` and `data/submissions.json` are untouched. `data/calibration-v2/` and `data/calibration-v3/` are left alone.
