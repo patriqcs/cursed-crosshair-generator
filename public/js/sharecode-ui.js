@@ -159,6 +159,14 @@ export function openShareCodeModal({ getParams, setParams }) {
       if (dec.legacy) {
         legacy = true;
         imported = migrateLegacyParams(dec.params, { screenHeight: LEGACY_SCREEN_HEIGHT });
+      } else if (dec.format === 'CSGO') {
+        // Alte Codes kennen den Scope-Dot nicht; wie das Spiel bleiben die aktuellen Werte stehen.
+        const cur = getParams() || {};
+        imported = normalizeParams({
+          ...dec.params,
+          cl_ironsight_usecrosshaircolor: cur.cl_ironsight_usecrosshaircolor,
+          cl_ironsight_dot_scale: cur.cl_ironsight_dot_scale,
+        });
       } else {
         imported = normalizeParams(dec.params);
       }

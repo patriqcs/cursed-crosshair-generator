@@ -141,6 +141,13 @@ test('validateParams fills missing keys with cvar defaults', () => {
   }
 });
 
+test('validateParams: input without outline cvars (stale client) gets black outline with the crosshair alpha', () => {
+  const stale = { ...FULL_PARAMS, cl_crosshaircolor_a: 120 };
+  for (const k of Object.keys(stale)) if (k.startsWith('cl_crosshairoutline_')) delete stale[k];
+  const r = validateParams(stale);
+  assert.deepEqual([r.cl_crosshairoutline_r, r.cl_crosshairoutline_g, r.cl_crosshairoutline_b, r.cl_crosshairoutline_a], [0, 0, 0, 120]);
+});
+
 test('validateParams drops unknown and legacy keys', () => {
   const r = validateParams({ ...FULL_PARAMS, bogus: 1, cl_crosshairsize: 5, __proto__x: 1 });
   assert.equal('bogus' in r, false);

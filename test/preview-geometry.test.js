@@ -147,7 +147,33 @@ test('rescale keeps the sign of the gap and never rounds a non-zero value to 0',
   assert.equal(scaleGap(0, 1080, 960), 0);
   assert.equal(scaleGap(10, 1080, 960), scalePx(10, 1080, 960));
   assert.equal(scaleGap(-7, 1080, 1080), -7);
-  assert.equal(scaleGap(-3840, 1080, 2160), -7680);
+  assert.equal(scaleGap(-3840, 1080, 2160), -7680); // reine Umrechnung; der Cvar-Clamp folgt in buildShapes
+});
+
+test('rescaled values are clamped back into the cvar range (the game writes them to the cvars)', async () => {
+  const { buildShapes } = await load();
+  // 960 -> 1080 (Faktor 1.125): 255 * 1.125 = 287 und 32 * 1.125 = 36 waeren ausserhalb der Cvar-Range.
+  const s = buildShapes({ ...BASE, cl_crosshair_length: 255, cl_crosshair_thickness: 32, cl_crosshair_gap: 0,
+    cl_crosshair_screen_height: 960 }, H, W);
+  assert.deepEqual(s[0].a, [CX - 255, CY - 16, CX - 1, CY + 15]);
+  const far = buildShapes({ ...BASE, cl_crosshair_gap: 3840, cl_crosshair_screen_height: 540 }, H, W);
+  assert.equal(far[0].a[2], CX - 3840 - 1); // Gap bleibt bei 3840 statt 7680
+});
+
+test('Classic split lengths and alphas follow the float32 arithmetic of the game', async () => {
+  const { buildShapes } = await load();
+  const split = (ratio, over = {}) => buildShapes({ ...BASE, cl_crosshairstyle: 2, cl_crosshair_length: 10, cl_crosshair_gap: 0,
+    cl_crosshair_dynamic_splitdist: 3, cl_crosshair_dynamic_maxdist_splitratio: ratio, ...over }, H, W, { spreadPx: 45 });
+  const len = (sh) => sh.a[2] - sh.a[0] + 1;
+  // ratio 0.7: float32 (1 - 0.7f) * 10 = 3.0 exakt -> innen 3 (double: 3.0000000000000004 -> 4)
+  let s = split(0.7);
+  assert.equal(len(s[0]), 7); assert.equal(len(s[4]), 3);
+  // ratio 0.9: float32 (1 - 0.9f) * 10 = 1.0000002 -> innen 2 (double: 0.9999999999999998 -> 1)
+  s = split(0.9);
+  assert.equal(len(s[0]), 9); assert.equal(len(s[4]), 2);
+  // alpha 100 * 0.29f = 29.000002 -> 29 (double: 28.999999999999996 -> 28)
+  s = split(0.5, { cl_crosshaircolor_a: 100, cl_crosshair_dynamic_splitalpha_innermod: 0.29 });
+  close(s[4].fill[3], 29 / 255);
 });
 
 test('thickness 32 is accepted, style values above 9 clamp to 9', async () => {

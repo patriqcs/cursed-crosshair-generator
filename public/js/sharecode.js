@@ -23,7 +23,7 @@
 // Altes Format: CSGO-AAAAA-BBBBB-CCCCC-DDDDD-EEEEE (25 Zeichen Base57 -> 18 Bytes),
 // Referenz akiver/csgo-sharecode v6.0.0. Byte 0 = Pruefsumme sum(bytes[1..17]), Byte 1 = Version.
 //   Version 1: Layout vor dem Update vom 2026-09-22. Vom Spiel abgelehnt; hier nur zum Migrieren.
-//   Version 3/4: Pixel-Layout vom 23./24.09.2026. Das Spiel importiert sie weiterhin und setzt dabei
+//   Version 3/4 (das Spiel behandelt jede Version > 3 wie 4): Pixel-Layout vom 23./24.09.2026. Das Spiel importiert sie weiterhin und setzt dabei
 //              Outline-Farbe = Schwarz mit Outline-Alpha = Crosshair-Alpha; decode() macht dasselbe.
 //   Pixel-Layout (V3/V4), Bytes 2..17:
 //   [2]  bits 0..3 style | bit 4 recoil | bit 5 outline (nur V3) | bit 6 dot | bit 7 t-style
@@ -62,10 +62,17 @@ function trackClamp(list, key, original, clamped) {
   if (Number.isFinite(original) && original !== clamped) list.push({ key, from: original, to: clamped });
 }
 
-function checksum(bytes) {
+function checksum(bytes, end = bytes.length) {
   let sum = 0;
-  for (let i = 1; i < bytes.length; i++) sum = (sum + bytes[i]) & 0xff;
+  for (let i = 1; i < end; i++) sum = (sum + bytes[i]) & 0xff;
   return sum;
+}
+
+// roundf(x / 0.01f) bzw. roundf((x - min) / 0.01f) in float32, wie der Encoder des Spiels.
+// Auf dem 0.01-Raster identisch mit round(x * 100) - min * 100.
+const F = Math.fround;
+function steps01(x, min = 0) {
+  return Math.round(F(F(F(x) - F(min)) / F(0.01)));
 }
 
 // Bytes (big-endian Zahl) -> Base57-Ziffern, niederwertigste zuerst.
@@ -116,12 +123,11 @@ export function encode(params) {
   const thickness = Math.round(c('cl_crosshair_thickness', 2));
   const spread = Math.round(c('cl_crosshair_dynamic_spread_limit', 255));
   const splitDist = Math.round(c('cl_crosshair_dynamic_splitdist', 3));
-  // Das Spiel rechnet roundf(x / 0.01); round(x * 100) ist dasselbe ohne Float-Kipper.
-  const inner = Math.round(c('cl_crosshair_dynamic_splitalpha_innermod', 0) * 100);
-  const outer = Math.round(c('cl_crosshair_dynamic_splitalpha_outermod', 1) * 100) - 30;
-  const ratio = Math.round(c('cl_crosshair_dynamic_maxdist_splitratio', 1) * 100);
+  const inner = steps01(c('cl_crosshair_dynamic_splitalpha_innermod', 0));
+  const outer = steps01(c('cl_crosshair_dynamic_splitalpha_outermod', 1), 0.3);
+  const ratio = steps01(c('cl_crosshair_dynamic_maxdist_splitratio', 1));
   const scopeColor = bool01(p.cl_ironsight_usecrosshaircolor);
-  const scopeScale = Math.round(c('cl_ironsight_dot_scale', 1) * 100) - 10;
+  const scopeScale = steps01(c('cl_ironsight_dot_scale', 1), 0.1);
   const screenH = Math.round(c('cl_crosshair_screen_height', 1080));
 
   const bits = (splitDist | (inner << 7) | (outer << 14) | (ratio << 21) | (scopeColor << 28)) >>> 0;
@@ -212,8 +218,10 @@ function decodePixel(bytes, version) {
     cl_crosshair_length: bytes[8],
     cl_crosshair_dynamic_spread_limit: bytes[9],
     cl_crosshair_dynamic_splitdist: bits & 0x7f,
-    cl_crosshair_dynamic_splitalpha_innermod: ((bits >>> 7) & 0x1f) / 20,
-    cl_crosshair_dynamic_splitalpha_outermod: (((bits >>> 12) & 0xf) + 6) / 20,
+    // Das Spiel rechnet die 0.05er-Schritte in 0.01er um (n * 5) und legt sie in 7-Bit-Feldern ab;
+    // innermod-Rohwerte ueber 25 laufen dabei ueber (nur bei konstruierten Codes).
+    cl_crosshair_dynamic_splitalpha_innermod: ((((bits >>> 7) & 0x1f) * 5) & 0x7f) / 100,
+    cl_crosshair_dynamic_splitalpha_outermod: (((bits >>> 12) & 0xf) * 5 + 30) / 100,
     cl_crosshair_dynamic_maxdist_splitratio: ((bits >>> 16) & 0x7f) / 100,
     cl_crosshair_thickness: (bits >>> 23) & 0x1f,
     cl_crosshair_screen_height: bytes[14] | (bytes[15] << 8),
@@ -268,13 +276,16 @@ export function decode(code) {
 
   if (/^CSGO(?:-[A-Za-z0-9]{5}){5}$/.test(text)) {
     const bytes = digitsToBytes(text.slice(5).replace(/-/g, ''), OLD_BYTES);
-    if (!bytes || checksum(bytes) !== bytes[0]) return null;
-    switch (bytes[1]) {
-      case 1: return { format: 'CSGO', version: 1, legacy: true, params: decodeV1(bytes) };
-      case 3: return { format: 'CSGO', version: 3, params: decodePixel(bytes, 3) };
-      case 4: return { format: 'CSGO', version: 4, params: decodePixel(bytes, 4) };
-      default: return null;
+    if (!bytes) return null;
+    const version = bytes[1];
+    if (version === 1) {
+      if (checksum(bytes) !== bytes[0]) return null;
+      return { format: 'CSGO', version: 1, legacy: true, params: decodeV1(bytes) };
     }
+    // Wie der Decoder des Spiels (VMA 1bec860): Pruefsumme nur ueber die Bytes 1..15, Version 2
+    // ungueltig, jede Version >= 3 gueltig — 3 mit Outline-Bool, alles darueber im V4-Layout.
+    if (version < 3 || checksum(bytes, 16) !== bytes[0]) return null;
+    return { format: 'CSGO', version, params: decodePixel(bytes, version === 3 ? 3 : 4) };
   }
   return null;
 }

@@ -177,13 +177,17 @@ export function buildShapes(params, screenH = SCREEN_H, screenW = SCREEN_W, opts
   const p = params || {};
   const style = clamp(Math.round(num(p.cl_crosshairstyle, 4)), 0, 9);
   const refH = Math.max(240, num(p.cl_crosshair_screen_height, 1080));
-  const length = scalePx(clamp(num(p.cl_crosshair_length, 8), 0, 255), refH, screenH);
-  const t = scalePx(clamp(num(p.cl_crosshair_thickness, 2), 0, 32), refH, screenH);
+  // Nach dem Umrechnen schreibt das Spiel die Werte in die Cvars zurueck (VMA 1bfa340); deren
+  // Setter clampt auf die Cvar-Range. Ab dem zweiten Frame gelten also auch fuer die
+  // umgerechneten Werte length <= 255, thickness <= 32, spread_limit <= 255, splitdist <= 127
+  // und |gap| <= 3840 — deshalb hier Clamp vor UND nach dem Skalieren.
+  const length = Math.min(255, scalePx(clamp(num(p.cl_crosshair_length, 8), 0, 255), refH, screenH));
+  const t = Math.min(32, scalePx(clamp(num(p.cl_crosshair_thickness, 2), 0, 32), refH, screenH));
   // Gap kann negativ sein. Wirksam ist das nur im Classic-Style; alle anderen Styles
   // clampen beim Zeichnen auf 0 (Cross, Square) bzw. 1 (Kreis, Static Quadrant).
-  const gap = scaleGap(clamp(num(p.cl_crosshair_gap, 4), -3840, 3840), refH, screenH);
+  const gap = clamp(scaleGap(clamp(num(p.cl_crosshair_gap, 4), -3840, 3840), refH, screenH), -3840, 3840);
   const gap0 = Math.max(0, gap);
-  const spreadLimit = scalePx(clamp(num(p.cl_crosshair_dynamic_spread_limit, 255), 0, 255), refH, screenH);
+  const spreadLimit = Math.min(255, scalePx(clamp(num(p.cl_crosshair_dynamic_spread_limit, 255), 0, 255), refH, screenH));
   const dot = num(p.cl_crosshairdot, 0) === 1;
   const tStyle = num(p.cl_crosshair_t, 0) === 1;
   const outlineMode = clamp(Math.round(num(p.cl_crosshair_drawoutline, 1)), 0, 2);
@@ -256,7 +260,7 @@ export function buildShapes(params, screenH = SCREEN_H, screenW = SCREEN_W, opts
       // aeussere bei spreadPx + gap + innerLen mit alpha*outermod. Gap darf hier negativ sein:
       // es verkuerzt die Distanz, die Balken bleiben aber bei >= 0 (Clamp in crossWith).
       // splitdist wird wie die anderen Groessen auf die aktuelle Hoehe umgerechnet.
-      const splitdist = scalePx(clamp(num(p.cl_crosshair_dynamic_splitdist, 3), 0, 127), refH, screenH);
+      const splitdist = Math.min(127, scalePx(clamp(num(p.cl_crosshair_dynamic_splitdist, 3), 0, 127), refH, screenH));
       const inner = clamp(num(p.cl_crosshair_dynamic_splitalpha_innermod, 0), 0, 1);
       const outer = clamp(num(p.cl_crosshair_dynamic_splitalpha_outermod, 1), 0.3, 1);
       const ratio = clamp(num(p.cl_crosshair_dynamic_maxdist_splitratio, 1), 0, 1);
@@ -265,14 +269,17 @@ export function buildShapes(params, screenH = SCREEN_H, screenW = SCREEN_W, opts
       const splitPx = roundHalfAway(screenH / 480 * Math.min(splitdist, spread01));
       if (sPx <= 0) { cross(gap); break; }              // stehend; Laufen/Ducken nur im Spiel (+2/-2/+4)
       if (spread01 > splitdist) {
-        const innerLen = Math.ceil((1 - ratio) * length);
-        const outerLen = Math.floor(ratio * length);
+        // Das Spiel rechnet hier in float32 (subss/mulss/roundss bzw. cvttss2si). In double kippen
+        // einzelne Faelle um 1 px bzw. 1 Alpha-Stufe (z.B. ratio 0.7, length 10: innen 3 statt 4).
+        const f = Math.fround;
+        const innerLen = Math.ceil(f(f(1 - f(ratio)) * length));
+        const outerLen = Math.floor(f(length * f(ratio)));
         // Fill- und Outline-Alpha werden beide mit trunc(alpha * mod) skaliert.
         const a255 = Math.round(alpha * 255);
         const o255 = Math.round(outline[3] * 255);
         const withAlpha = (mod) => ({
-          fill: [fill[0], fill[1], fill[2], Math.trunc(a255 * mod) / 255],
-          outline: [outline[0], outline[1], outline[2], Math.trunc(o255 * mod) / 255],
+          fill: [fill[0], fill[1], fill[2], Math.trunc(f(a255 * f(mod))) / 255],
+          outline: [outline[0], outline[1], outline[2], Math.trunc(f(o255 * f(mod))) / 255],
         });
         const o = withAlpha(outer), i = withAlpha(inner);
         crossWith(sPx + gap + innerLen, outerLen, o.fill, o.outline);

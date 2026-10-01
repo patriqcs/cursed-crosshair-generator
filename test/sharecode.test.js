@@ -282,3 +282,29 @@ test('rejects malformed or corrupted codes', async () => {
   assert.equal(decode(''), null);
   assert.equal(decode(null), null);
 });
+
+test('old format: checksum covers bytes 1..15 only and any version >= 3 decodes (as in the game)', async () => {
+  const { decode } = await load();
+  const DICT = 'ABCDEFGHJKLMNOPQRSTUVWXYZabcdefhijkmnopqrstuvwxyz23456789';
+  const toCode = (bytes) => {
+    let big = 0n; for (const b of bytes) big = (big << 8n) | BigInt(b);
+    let chars = ''; for (let i = 0; i < 25; i++) { chars += DICT[Number(big % 57n)]; big /= 57n; }
+    return `CSGO-${chars.slice(0, 5)}-${chars.slice(5, 10)}-${chars.slice(10, 15)}-${chars.slice(15, 20)}-${chars.slice(20)}`;
+  };
+  const sum15 = (b) => { let s = 0; for (let i = 1; i < 16; i++) s = (s + b[i]) & 0xff; return s; };
+  // Version 7, innermod-Rohwert 30 (-> 150 & 0x7f = 22 -> 0.22), Bytes 16/17 belegt
+  const bits = (3 | (30 << 7) | (4 << 12) | (50 << 16) | (5 << 23) | (2 << 28)) >>> 0;
+  const b = [0, 7, 0x04 | 0x10, 1, 2, 3, 200, 9, 8, 77, bits & 0xff, (bits >>> 8) & 0xff, (bits >>> 16) & 0xff, (bits >>> 24) & 0xff, 0x38, 0x04, 0xaa, 0xbb];
+  b[0] = sum15(b);
+  const res = decode(toCode(b));
+  assert.ok(res);
+  assert.equal(res.version, 7);
+  assert.equal(res.params.cl_crosshair_drawoutline, 2);
+  assert.equal(res.params.cl_crosshair_recoil, 1);
+  assert.equal(res.params.cl_crosshair_dynamic_splitalpha_innermod, 0.22);
+  assert.equal(res.params.cl_crosshair_dynamic_splitalpha_outermod, 0.5);
+  assert.equal(res.params.cl_crosshair_thickness, 5);
+  // Pruefsumme ueber alle 17 Bytes (wie akiver) waere hier falsch -> das Spiel prueft nur 1..15
+  const wrong = [...b]; wrong[0] = (wrong[0] + 1) & 0xff;
+  assert.equal(decode(toCode(wrong)), null);
+});
